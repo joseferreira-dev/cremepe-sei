@@ -18,3 +18,12 @@ logs/
 # beside it.
 /.plugins/
 /.opencode-skills/
+
+# Backend
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/uploads/
+backend/prisma/dev.db
+backend/server.log
+backend/server.log.err

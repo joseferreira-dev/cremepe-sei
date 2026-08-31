@@ -1,0 +1,48 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+html,
+body,
+#root {
+  height: 100%;
+  font-family: 'Inter', sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #009C60 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #009C6060;
+  border-radius: 2px;
+}
+
+@theme inline {
+  --color-cremepe: #009C60;
+  --color-cremepe-dark: #006B42;
+  --color-cremepe-darker: #003D26;
+  --color-sei-blue: #29ABE2;
+  --color-sei-lime: #8DC63F;
+}
+
+@keyframes dialog-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dialog-pop {
+  from { opacity: 0; transform: scale(0.95) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-dialog-fade { animation: dialog-fade 0.15s ease-out; }
+.animate-dialog-pop { animation: dialog-pop 0.2s ease-out; }
+

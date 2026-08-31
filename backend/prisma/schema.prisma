@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         String    @default("analista") // admin, protocolo, analista, gestor
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  annotations Annotation[]
+
+  @@map("users")
+}
+
+model Process {
+  id                String    @id @default(uuid())
+  numeroSei         String    @unique @map("numero_sei")
+  tipo              String?
+  especificacao     String?
+  dataAutuacao      String?   @map("data_autuacao")
+  nivelAcesso       String?   @map("nivel_acesso")
+  idHipoteseLegal   String?   @map("id_hipotese_legal")
+  assuntos          String    @default("[]") // JSON array as string
+  interessados      String    @default("[]") // JSON array as string
+  unidadeAtual      String?   @map("unidade_atual") // JSON object as string
+  ultimoAndamento   String?   @map("ultimo_andamento") // JSON object as string
+  statusSistema     String    @default("em_analise") @map("status_sistema")
+  resumoIa          String?   @map("resumo_ia")
+  resumoGeradoEm    DateTime? @map("resumo_gerado_em")
+  sincronizadoEm    DateTime? @map("sincronizado_em")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  annotations Annotation[]
+  tags        ProcessTag[]
+  syncLogs    SyncLog[]
+
+  @@map("processes")
+}
+
+model Annotation {
+  id        String   @id @default(uuid())
+  processId String   @map("process_id")
+  userId    String   @map("user_id")
+  userName  String   @map("user_name")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  process Process @relation(fields: [processId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("annotations")
+}
+
+model Tag {
+  id        String       @id @default(uuid())
+  name      String       @unique
+  color     String
+  processes ProcessTag[]
+
+  @@map("tags")
+}
+
+model ProcessTag {
+  processId String @map("process_id")
+  tagId     String @map("tag_id")
+
+  process Process @relation(fields: [processId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([processId, tagId])
+  @@map("process_tags")
+}
+
+model SyncLog {
+  id        String    @id @default(uuid())
+  processId String?   @map("process_id")
+  numeroSei String?   @map("numero_sei")
+  tipo      String    // manual, batch, auto
+  status    String    // success, error
+  mensagem  String
+  executedAt DateTime @default(now()) @map("executed_at")
+
+  process Process? @relation(fields: [processId], references: [id], onDelete: SetNull)
+
+  @@map("sync_logs")
+}
+
+model Configuration {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("configurations")
+}
