@@ -9,7 +9,7 @@ export interface User {
   createdAt: string;
 }
 
-export type ProcessStatus = 'em_analise' | 'finalizado' | 'pendente' | 'sobrestado';
+export type ProcessStatus = 'em_andamento' | 'finalizado' | 'pendente' | 'sobrestado';
 
 export interface Tag {
   id: string;

@@ -9,6 +9,7 @@ import ImportBatch from './components/ImportBatch';
 import TagsManager from './components/TagsManager';
 import Admin from './components/Admin';
 import Reports from './components/Reports';
+import SyncPage from './components/SyncPage';
 import { DialogProvider } from './components/ui/Dialog';
 import type { User } from './types';
 import { login as apiLogin, loadStoredUser, clearSession, getToken } from './api';
@@ -22,6 +23,7 @@ export type Page =
   | 'import'
   | 'tags'
   | 'reports'
+  | 'sync'
   | 'admin';
 
 export default function App() {
@@ -79,6 +81,8 @@ export default function App() {
         return <TagsManager />;
       case 'reports':
         return <Reports />;
+      case 'sync':
+        return <SyncPage navigateTo={navigateTo} />;
       case 'admin':
         return <Admin user={user} />;
       default:

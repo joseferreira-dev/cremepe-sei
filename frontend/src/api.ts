@@ -122,6 +122,15 @@ interface BackendProcess {
   annotations: Annotation[];
 }
 
+function mapStatus(raw: string): Process['status'] {
+  const s = raw.toLowerCase().trim();
+  if (s === 'em_analise' || s === 'em_andamento') return 'em_andamento';
+  if (s === 'finalizado' || s === 'concluido') return 'finalizado';
+  if (s === 'pendente') return 'pendente';
+  if (s === 'sobrestado') return 'sobrestado';
+  return 'em_andamento';
+}
+
 export function mapProcess(p: BackendProcess): Process {
   const anyP = p as any;
   return {
@@ -140,7 +149,7 @@ export function mapProcess(p: BackendProcess): Process {
     procedimentosRelacionados: Array.isArray(p.procedimentosRelacionados) ? p.procedimentosRelacionados : [],
     procedimentosAnexados: Array.isArray(p.procedimentosAnexados) ? p.procedimentosAnexados : [],
     ultimoAndamento: p.ultimoAndamento || { descricao: '', dataHora: '', usuario: '', unidade: '' },
-    status: (p.statusSistema || anyP.status || 'em_analise') as Process['status'],
+    status: mapStatus(p.statusSistema || anyP.status || 'em_andamento'),
     resumoIa: p.resumoIa || undefined,
     resumoGeradoEm: p.resumoGeradoEm || undefined,
     sincronizadoEm: p.sincronizadoEm || '',

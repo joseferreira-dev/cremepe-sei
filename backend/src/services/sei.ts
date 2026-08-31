@@ -663,6 +663,48 @@ function stripHtml(s: string): string {
   return decodeHtmlEntities(s).replace(/<[^>]*>/g, "").trim();
 }
 
+/**
+ * Determina se um processo está concluído.
+ *
+ * Regras:
+ * 1. Se tem unidades abertas → NÃO está concluído
+ * 2. Se o último andamento contém "Conclusão do processo na unidade" → CONCLUÍDO
+ * 3. Se está anexado a processos pai:
+ *    - Se TODOS os pais são concluídos → CONCLUÍDO (filho deixa de ser administrado)
+ *    - Se algum pai NÃO é concluído → NÃO está concluído
+ */
+export function isProcessoConcluido(
+  unidades: { id: string; sigla: string; descricao: string }[],
+  ultimoAndamento: { descricao: string } | null,
+  procedimentosRelacionados: { id: string; numero: string; tipo: string }[],
+  procedimentosAnexados: { id: string; numero: string; tipo: string }[],
+  parentStatus?: Map<string, string>
+): boolean {
+  // Critério 1: se ainda tem unidades, não está concluído
+  if (unidades.length > 0) return false;
+
+  // Critério 2: último andamento menciona conclusão
+  const desc = (ultimoAndamento?.descricao || "").toLowerCase();
+  const temConclusao = desc.includes("conclusão do processo na unidade")
+    || desc.includes("conclusao do processo na unidade");
+  if (temConclusao) return true;
+
+  // Critério 3: se está anexado a processos pai
+  const anexadosNumeros = new Set(procedimentosAnexados.map((p) => p.numero));
+  const pais = procedimentosRelacionados.filter((p) => !anexadosNumeros.has(p.numero));
+
+  if (pais.length > 0 && parentStatus && parentStatus.size > 0) {
+    // Se TODOS os pais são concluídos → o filho também é
+    const todosPaisConcluidos = pais.every((p) => {
+      const st = parentStatus.get(p.numero);
+      return st === "finalizado";
+    });
+    if (todosPaisConcluidos) return true;
+  }
+
+  return false;
+}
+
 /** Converte código numérico de nível de acesso SEI em texto legível */
 function formatNivelAcesso(local: string, global_: string): string {
   // NivelAcessoGlobal é o campo decisório:

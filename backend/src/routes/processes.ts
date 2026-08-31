@@ -5,7 +5,7 @@ import { unlink, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { prisma } from "../db/prisma.js";
 import { authMiddleware } from "../middleware/auth.js";
-import { consultarProcedimento, listarAndamentos, listarUnidades } from "../services/sei.js";
+import { consultarProcedimento, listarAndamentos, listarUnidades, isProcessoConcluido } from "../services/sei.js";
 import { gerarResumo } from "../services/gemini.js";
 import { extrairTexto } from "../services/fileExtractor.js";
 import { AppError } from "../utils/errors.js";
@@ -230,6 +230,14 @@ router.post("/", async (req: Request, res: Response) => {
       }
     }
 
+    // Detecta se processo está concluído
+    const concluido = isProcessoConcluido(
+      unidades,
+      seiData.UltimoAndamento ? { descricao: seiData.UltimoAndamento.Descricao } : null,
+      (seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+      (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+    );
+
     const processo = await prisma.process.create({
       data: {
         numeroSei,
@@ -238,6 +246,7 @@ router.post("/", async (req: Request, res: Response) => {
         dataAutuacao: seiData.DataAutuacao || null,
         nivelAcesso: seiData.NivelAcesso || null,
         linkSei: seiData.LinkAcesso || null,
+        statusSistema: concluido ? "finalizado" : "em_andamento",
         assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
         interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
         unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({
@@ -333,11 +342,19 @@ router.post("/import", async (req: Request, res: Response) => {
           } catch { /* falha não impede importação */ }
         }
 
+        const concluidoBatch = isProcessoConcluido(
+          unidadesBatch,
+          seiData.UltimoAndamento ? { descricao: seiData.UltimoAndamento.Descricao } : null,
+          (seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+          (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+        );
+
         const processo = await prisma.process.create({
           data: {
             numeroSei: num,
             tipo: seiData.TipoProcedimento?.Nome || null,
             especificacao: seiData.Especificacao || null,
+            statusSistema: concluidoBatch ? "finalizado" : "em_andamento",
             dataAutuacao: seiData.DataAutuacao || null,
             nivelAcesso: seiData.NivelAcesso || null,
             linkSei: seiData.LinkAcesso || null,
@@ -440,6 +457,38 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
       } catch { /* falha não impede sincronização */ }
     }
 
+    // Detecta se processo está concluído
+    const andamentosSyncParsed = andamentosSync.map((a) => ({
+      id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora,
+      usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "",
+    }));
+    const ultimoAndSync = andamentosSyncParsed.length > 0 ? andamentosSyncParsed[0] : null;
+
+    // Busca status dos processos pai no banco (para verificar se todos são concluídos)
+    const anexadosNumeros = (seiData.ProcedimentosAnexados || []).map((p) => p.ProcedimentoFormatado);
+    const relatedNumeros = (seiData.ProcedimentosRelacionados || [])
+      .map((p) => p.ProcedimentoFormatado)
+      .filter((num) => !anexadosNumeros.includes(num));
+
+    const parentStatusMap = new Map<string, string>();
+    if (relatedNumeros.length > 0) {
+      const parents = await prisma.process.findMany({
+        where: { numeroSei: { in: relatedNumeros } },
+        select: { numeroSei: true, statusSistema: true },
+      });
+      for (const p of parents) {
+        parentStatusMap.set(p.numeroSei, p.statusSistema);
+      }
+    }
+
+    const concluido = isProcessoConcluido(
+      unidadesSync,
+      ultimoAndSync || (seiData.UltimoAndamento ? { descricao: seiData.UltimoAndamento.Descricao } : null),
+      (seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+      (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+      parentStatusMap,
+    );
+
     const updated = await prisma.process.update({
       where: { id: process.id },
       data: {
@@ -447,6 +496,7 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
         especificacao: seiData.Especificacao || process.especificacao,
         nivelAcesso: seiData.NivelAcesso || process.nivelAcesso,
         linkSei: seiData.LinkAcesso || process.linkSei,
+        statusSistema: concluido ? "finalizado" : process.statusSistema === "finalizado" ? "finalizado" : "em_andamento",
         assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
         interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
         unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({

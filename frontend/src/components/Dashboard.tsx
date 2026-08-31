@@ -8,8 +8,8 @@ interface Props {
   navigateTo: (page: Page, id?: string) => void;
 }
 
-const statusConfig = {
-  em_analise: { label: 'Em Análise', color: '#29ABE2' },
+const statusConfig: Record<string, { label: string; color: string }> = {
+  em_andamento: { label: 'Em Andamento', color: '#29ABE2' },
   finalizado: { label: 'Finalizado', color: '#009C60' },
   pendente: { label: 'Pendente', color: '#F59E0B' },
   sobrestado: { label: 'Sobrestado', color: '#6B7280' },
@@ -19,29 +19,39 @@ export default function Dashboard({ navigateTo }: Props) {
   const [processes, setProcesses] = useState<Process[]>([]);
 
   useEffect(() => {
-    listProcesses({ limit: 50 }).then((res) => setProcesses(res.processes)).catch(() => {});
+    listProcesses({ limit: 100 }).then((res) => setProcesses(res.processes)).catch(() => {});
   }, []);
 
   const total = processes.length;
-  const semResumo = processes.filter((p) => !p.resumoIa).length;
-  const pendentes = processes.filter((p) => p.status === 'pendente').length;
+  const comResumo = processes.filter((p) => p.resumoIa).length;
+  const emAndamento = processes.filter((p) => p.status === 'em_andamento').length;
   const finalizados = processes.filter((p) => p.status === 'finalizado').length;
 
-  // Processes by unit
-  const byUnit = Object.entries(
-    processes.reduce<Record<string, number>>((acc, p) => {
-      const sigla = p.unidadeAtual.sigla || '—';
-      acc[sigla] = (acc[sigla] || 0) + 1;
-      return acc;
-    }, {})
-  ).map(([name, value]) => ({ name, value }));
+  // Distribuição por unidade (usa array `unidades`)
+  const unitCount = processes.reduce<Record<string, number>>((acc, p) => {
+    if (p.unidades.length > 0) {
+      for (const u of p.unidades) {
+        acc[u.sigla] = (acc[u.sigla] || 0) + 1;
+      }
+    } else {
+      acc['Sem unidade'] = (acc['Sem unidade'] || 0) + 1;
+    }
+    return acc;
+  }, {});
+  const byUnit = Object.entries(unitCount)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10);
 
-  const recent = [...processes].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5);
+  // Últimos cadastrados
+  const recent = [...processes]
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    .slice(0, 5);
 
   const kpis = [
     { label: 'Total de Processos', value: total, color: '#009C60', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', page: 'processes' as Page },
-    { label: 'Sem Resumo IA', value: semResumo, color: '#F59E0B', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', page: 'processes' as Page },
-    { label: 'Pendentes', value: pendentes, color: '#EF4444', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', page: 'processes' as Page },
+    { label: 'Com Resumo IA', value: comResumo, color: '#29ABE2', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', page: 'processes-sem-resumo' as Page },
+    { label: 'Em Andamento', value: emAndamento, color: '#6366F1', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', page: 'processes' as Page },
     { label: 'Finalizados', value: finalizados, color: '#8DC63F', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', page: 'processes' as Page },
   ];
 
@@ -78,29 +88,30 @@ export default function Dashboard({ navigateTo }: Props) {
       </div>
 
       {/* Charts + Recent */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Bar chart */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 p-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Processos por Unidade */}
+        <div className="bg-white rounded-xl border border-gray-100 p-6">
           <h2 className="text-sm font-semibold text-gray-800 mb-4" style={{ fontFamily: "'Outfit', sans-serif" }}>Processos por Unidade</h2>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={byUnit} layout="vertical" margin={{ left: 0, right: 16 }}>
-              <XAxis type="number" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={64} />
-              <Tooltip
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                cursor={{ fill: '#f3f4f6' }}
-              />
-              <Bar dataKey="value" radius={4}>
-                {byUnit.map((_, i) => (
-                  <Cell key={i} fill={['#009C60', '#29ABE2', '#8DC63F', '#F59E0B', '#6366F1'][i % 5]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          {byUnit.length > 0 ? (
+            <ResponsiveContainer width="100%" height={Math.max(200, byUnit.length * 28)}>
+              <BarChart data={byUnit} layout="vertical" margin={{ left: 0, right: 16 }}>
+                <XAxis type="number" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={130} />
+                <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }} cursor={{ fill: '#f3f4f6' }} />
+                <Bar dataKey="value" radius={4}>
+                  {byUnit.map((_, i) => (
+                    <Cell key={i} fill={['#009C60', '#29ABE2', '#8DC63F', '#F59E0B', '#6366F1'][i % 5]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-sm text-gray-400 text-center py-8">Nenhuma unidade registrada.</p>
+          )}
         </div>
 
-        {/* Recent processes */}
-        <div className="lg:col-span-3 bg-white rounded-xl border border-gray-100 p-6">
+        {/* Últimos processos */}
+        <div className="bg-white rounded-xl border border-gray-100 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-800" style={{ fontFamily: "'Outfit', sans-serif" }}>Últimos Processos Cadastrados</h2>
             <button
@@ -113,7 +124,7 @@ export default function Dashboard({ navigateTo }: Props) {
           </div>
           <div className="space-y-3">
             {recent.map((p) => {
-              const cfg = statusConfig[p.status];
+              const cfg = statusConfig[p.status] || statusConfig.em_andamento;
               return (
                 <button
                   key={p.id}
@@ -130,20 +141,26 @@ export default function Dashboard({ navigateTo }: Props) {
                     <p className="text-xs font-mono text-gray-500">{p.numeroSei}</p>
                     <p className="text-sm font-medium text-gray-800 truncate">{p.especificacao}</p>
                   </div>
-                  <div className="text-xs text-gray-400 shrink-0">{p.unidadeAtual.sigla}</div>
+                  <div className="text-xs text-gray-400 shrink-0">
+                    {p.unidades.length > 0 ? p.unidades[0].sigla : '—'}
+                  </div>
                 </button>
               );
             })}
+            {recent.length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-4">Nenhum processo cadastrado.</p>
+            )}
           </div>
         </div>
       </div>
 
       {/* Quick actions */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         {[
           { label: 'Novo Processo', desc: 'Cadastrar manualmente', page: 'new-process' as Page, color: '#009C60', icon: 'M12 4v16m8-8H4' },
-          { label: 'Importar Lote', desc: 'Via arquivo CSV ou texto', page: 'import' as Page, color: '#29ABE2', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' },
-          { label: 'Relatórios', desc: 'Exportar e visualizar', page: 'reports' as Page, color: '#8DC63F', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+          { label: 'Importar Lote', desc: 'Via SEI', page: 'import' as Page, color: '#29ABE2', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' },
+          { label: 'Sincronização', desc: 'Atualizar dados do SEI', page: 'sync' as Page, color: '#6366F1', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+          { label: 'Relatórios', desc: 'Análise consolidada', page: 'reports' as Page, color: '#8DC63F', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
         ].map((action) => (
           <button
             key={action.label}

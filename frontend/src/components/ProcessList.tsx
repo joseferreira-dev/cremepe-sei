@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Page } from '../App';
-import { listProcesses, deleteProcess, listUnidades, syncProcess, type SeiUnidade } from '../api';
+import { listProcesses, deleteProcess, listUnidades, type SeiUnidade } from '../api';
 import type { Process, ProcessStatus, User } from '../types';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
@@ -12,7 +12,7 @@ interface Props {
 }
 
 const statusConfig: Record<ProcessStatus, { label: string; color: string; bg: string }> = {
-  em_analise: { label: 'Em Análise', color: '#1D4ED8', bg: '#DBEAFE' },
+  em_andamento: { label: 'Em Andamento', color: '#1D4ED8', bg: '#DBEAFE' },
   finalizado: { label: 'Finalizado', color: '#065F46', bg: '#D1FAE5' },
   pendente: { label: 'Pendente', color: '#92400E', bg: '#FEF3C7' },
   sobrestado: { label: 'Sobrestado', color: '#374151', bg: '#F3F4F6' },
@@ -32,8 +32,6 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState<SeiUnidade[]>([]);
-  const [syncingAll, setSyncingAll] = useState(false);
-  const [syncProgress, setSyncProgress] = useState<{ done: number; total: number } | null>(null);
   const perPage = 10;
 
   useEffect(() => {
@@ -100,29 +98,6 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
     }
   };
 
-  const handleSyncAll = async () => {
-    if (syncingAll) return;
-    setSyncingAll(true);
-    setSyncProgress({ done: 0, total: data.length });
-    try {
-      for (let i = 0; i < data.length; i++) {
-        setSyncProgress({ done: i + 1, total: data.length });
-        try {
-          await syncProcess(data[i].id);
-        } catch {
-          // falha em individual não interrompe o lote
-        }
-      }
-      dialog.success('Sincronização concluída para todos os processos da página.');
-      load();
-    } catch (e: any) {
-      dialog.error(e?.message || 'Erro durante a sincronização.');
-    } finally {
-      setSyncingAll(false);
-      setSyncProgress(null);
-    }
-  };
-
   const SortIcon = ({ col }: { col: string }) => (
     <svg className="w-3 h-3 ml-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d={
@@ -162,23 +137,6 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
             </svg>
             Importar Lote
           </button>
-          <button
-            onClick={handleSyncAll}
-            disabled={syncingAll || data.length === 0}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-          >
-            {syncingAll ? (
-              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            )}
-            {syncingAll ? `Sincronizando ${syncProgress?.done || 0}/${syncProgress?.total || 0}…` : 'Sincronizar Todos'}
-          </button>
         </div>
       </div>
 
@@ -202,7 +160,7 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
         >
           <option value="all">Todos os status</option>
-          <option value="em_analise">Em Análise</option>
+          <option value="em_andamento">Em Andamento</option>
           <option value="pendente">Pendente</option>
           <option value="finalizado">Finalizado</option>
           <option value="sobrestado">Sobrestado</option>

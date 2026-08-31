@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../App';
 import type { User, Process, ProcessStatus, Annotation } from '../types';
-import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, listTags, deleteProcess, findProcessByNumero } from '../api';
+import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, listTags, deleteProcess, findProcessByNumero, createProcess } from '../api';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
 
@@ -12,7 +12,7 @@ interface Props {
 }
 
 const statusConfig: Record<ProcessStatus, { label: string; color: string; bg: string }> = {
-  em_analise: { label: 'Em Análise', color: '#1D4ED8', bg: '#DBEAFE' },
+  em_andamento: { label: 'Em Andamento', color: '#1D4ED8', bg: '#DBEAFE' },
   finalizado: { label: 'Finalizado', color: '#065F46', bg: '#D1FAE5' },
   pendente: { label: 'Pendente', color: '#92400E', bg: '#FEF3C7' },
   sobrestado: { label: 'Sobrestado', color: '#374151', bg: '#F3F4F6' },
@@ -151,7 +151,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     setStatusSaving(true);
     setStatusError('');
     try {
-      const nextStatus = process.status === 'finalizado' ? 'em_analise' : 'finalizado';
+      const nextStatus = process.status === 'finalizado' ? 'em_andamento' : 'finalizado';
       await updateProcess(process.id, { statusSistema: nextStatus });
       await getProcess(process.id).then(setProcess);
     } catch (e: any) {
