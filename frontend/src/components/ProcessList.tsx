@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Page } from '../App';
-import { listProcesses, deleteProcess, listUnidades, type SeiUnidade } from '../api';
+import { listProcesses, deleteProcess, listUnidades, syncProcess, type SeiUnidade } from '../api';
 import type { Process, ProcessStatus, User } from '../types';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
@@ -32,6 +32,8 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState<SeiUnidade[]>([]);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ done: number; total: number } | null>(null);
   const perPage = 10;
 
   useEffect(() => {
@@ -98,6 +100,29 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
     }
   };
 
+  const handleSyncAll = async () => {
+    if (syncingAll) return;
+    setSyncingAll(true);
+    setSyncProgress({ done: 0, total: data.length });
+    try {
+      for (let i = 0; i < data.length; i++) {
+        setSyncProgress({ done: i + 1, total: data.length });
+        try {
+          await syncProcess(data[i].id);
+        } catch {
+          // falha em individual não interrompe o lote
+        }
+      }
+      dialog.success('Sincronização concluída para todos os processos da página.');
+      load();
+    } catch (e: any) {
+      dialog.error(e?.message || 'Erro durante a sincronização.');
+    } finally {
+      setSyncingAll(false);
+      setSyncProgress(null);
+    }
+  };
+
   const SortIcon = ({ col }: { col: string }) => (
     <svg className="w-3 h-3 ml-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d={
@@ -136,6 +161,23 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
             </svg>
             Importar Lote
+          </button>
+          <button
+            onClick={handleSyncAll}
+            disabled={syncingAll || data.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            {syncingAll ? (
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            )}
+            {syncingAll ? `Sincronizando ${syncProgress?.done || 0}/${syncProgress?.total || 0}…` : 'Sincronizar Todos'}
           </button>
         </div>
       </div>
@@ -224,19 +266,18 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer whitespace-nowrap" onClick={() => toggleSort('dataAutuacao')}>
                   Autuação <SortIcon col="dataAutuacao" />
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Ações</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={7} className="px-4 py-12 text-center text-gray-400 text-sm">
                     Carregando processos…
                   </td>
                 </tr>
               ) : sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={7} className="px-4 py-12 text-center text-gray-400 text-sm">
                     Nenhum processo encontrado com os filtros aplicados.
                   </td>
                 </tr>
@@ -298,39 +339,6 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
                       {formatDataPtBR(p.dataAutuacao)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => navigateTo('process-details', p.id)}
-                          title="Ver detalhes"
-                          className="p-1.5 rounded text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => navigateTo('process-details', p.id)}
-                          title="Sincronizar com SEI"
-                          className="p-1.5 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                          </svg>
-                        </button>
-                        {user?.role === 'admin' && (
-                          <button
-                            onClick={() => handleDelete(p)}
-                            title="Excluir processo"
-                            className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        )}
-                      </div>
                     </td>
                   </tr>
                 );

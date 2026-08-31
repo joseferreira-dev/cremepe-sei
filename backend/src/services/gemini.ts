@@ -17,13 +17,11 @@ Documentos do processo:
 // Lista padrão de modelos em ordem de preferência, usada como fallback quando
 // o modelo configurado falha (removido, indisponível ou com limite de uso).
 const MODELOS_PADRAO = [
-  "gemini-3.7-flash",
   "gemini-3.6-flash",
   "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
   "gemini-3.1-flash-lite",
   "gemini-3-flash",
-  "gemini-2.5-flash",
 ];
 
 export async function gerarResumo(textoDocumentos: string): Promise<string> {

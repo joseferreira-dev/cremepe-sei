@@ -600,12 +600,21 @@ router.post("/:id/resumo", upload.array("files", 20), async (req: Request, res: 
       return;
     }
 
-    if (!files || files.length === 0) {
-      res.status(400).json({ error: "Envie pelo menos um arquivo para gerar o resumo." });
+    const textoManual = (req.body.textoManual || "").trim();
+
+    if ((!files || files.length === 0) && !textoManual) {
+      res.status(400).json({ error: "Envie arquivos ou digite o texto para gerar o resumo." });
       return;
     }
 
     let textoCompleto = "";
+
+    // Texto inserido manualmente
+    if (textoManual) {
+      textoCompleto += `\n--- Texto inserido manualmente ---\n${textoManual}\n`;
+    }
+
+    // Texto extraído de arquivos
     for (const file of files) {
       tempPaths.push(file.path);
       try {

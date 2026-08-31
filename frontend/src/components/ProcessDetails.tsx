@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../App';
 import type { User, Process, ProcessStatus, Annotation } from '../types';
-import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, listTags, deleteProcess } from '../api';
+import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, listTags, deleteProcess, findProcessByNumero } from '../api';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
 
@@ -30,6 +30,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
   const [availTags, setAvailTags] = useState(process?.tags ?? []);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [resumoManualText, setResumoManualText] = useState('');
   const [generatingResume, setGeneratingResume] = useState(false);
   const [resumo, setResumo] = useState('');
   const [syncLoading, setSyncLoading] = useState(false);
@@ -99,9 +100,13 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
 
   const handleGenerateResume = async () => {
     if (!process) return;
+    if (uploadFiles.length === 0 && !resumoManualText.trim()) {
+      dialog.alert('Envie arquivos ou digite o texto para gerar o resumo.');
+      return;
+    }
     setGeneratingResume(true);
     try {
-      const { resumo: generated } = await generateSummary(process.id, uploadFiles);
+      const { resumo: generated } = await generateSummary(process.id, uploadFiles, resumoManualText);
       setResumo(generated);
       await getProcess(process.id).then(setProcess);
     } catch (e: any) {
@@ -110,6 +115,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
       setGeneratingResume(false);
       setShowUploadModal(false);
       setUploadFiles([]);
+      setResumoManualText('');
       setTab('resumo');
     }
   };
@@ -177,6 +183,25 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     { id: 'tags', label: 'Tags' },
     { id: 'relacionados', label: 'Processos Relacionados' },
   ] as const;
+
+  const handleClickRelated = async (numero: string) => {
+    const existing = await findProcessByNumero(numero);
+    if (existing) {
+      navigateTo('process-details', existing.id);
+      return;
+    }
+    const ok = await dialog.confirm(
+      `O processo ${numero} não está cadastrado no sistema. Deseja cadastrá-lo agora?`,
+      { title: 'Processo não encontrado' }
+    );
+    if (!ok) return;
+    try {
+      const created = await createProcess(numero);
+      navigateTo('process-details', created.id);
+    } catch (e: any) {
+      dialog.error(e?.message || 'Erro ao cadastrar processo.');
+    }
+  };
 
   return (
     <div className="p-8 space-y-6 max-w-5xl" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -590,7 +615,6 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
           {/* Processos Relacionados */}
           {tab === 'relacionados' && (
             <div>
-              {/* Processos anexados (filhos) */}
               <div className="mb-6">
                 <h3 className="font-semibold text-gray-800 mb-3" style={{ fontFamily: "'Outfit', sans-serif" }}>
                   Processos Anexados
@@ -601,31 +625,33 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
                 ) : (
                   <div className="space-y-2">
                     {process.procedimentosAnexados.map((p) => (
-                      <div key={p.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
-                        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: '#E0F2FE' }}>
+                      <button
+                        key={p.id}
+                        onClick={() => handleClickRelated(p.numero)}
+                        className="w-full flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left group"
+                      >
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform" style={{ background: '#E0F2FE' }}>
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#0369A1" strokeWidth={1.8}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                           </svg>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-mono font-semibold text-gray-800">{p.numero}</p>
+                          <p className="text-sm font-mono font-semibold text-gray-800 group-hover:text-blue-700 transition-colors">{p.numero}</p>
                           {p.tipo && <p className="text-xs text-gray-500 truncate">{p.tipo}</p>}
                         </div>
                         <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">Anexado</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
               </div>
 
-              {/* Processos que incluem este ( pais ) */}
               <div>
                 <h3 className="font-semibold text-gray-800 mb-3" style={{ fontFamily: "'Outfit', sans-serif" }}>
                   Processos que incluem este
                 </h3>
                 <p className="text-xs text-gray-500 mb-3">Processos nos quais este processo está anexado:</p>
                 {(() => {
-                  // Os processos "pai" estão em ProcedimentosRelacionados mas NÃO em ProcedimentosAnexados
                   const anexadosIds = new Set(process.procedimentosAnexados.map((p) => p.id));
                   const pais = process.procedimentosRelacionados.filter((p) => !anexadosIds.has(p.id));
                   return pais.length === 0 ? (
@@ -633,18 +659,22 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
                   ) : (
                     <div className="space-y-2">
                       {pais.map((p) => (
-                        <div key={p.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
-                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: '#FEF3C7' }}>
+                        <button
+                          key={p.id}
+                          onClick={() => handleClickRelated(p.numero)}
+                          className="w-full flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-amber-300 hover:bg-amber-50/50 transition-colors text-left group"
+                        >
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform" style={{ background: '#FEF3C7' }}>
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#92400E" strokeWidth={1.8}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                             </svg>
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-mono font-semibold text-gray-800">{p.numero}</p>
+                            <p className="text-sm font-mono font-semibold text-gray-800 group-hover:text-amber-700 transition-colors">{p.numero}</p>
                             {p.tipo && <p className="text-xs text-gray-500 truncate">{p.tipo}</p>}
                           </div>
                           <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">Processo pai</span>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   );
@@ -678,22 +708,40 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-gray-600">
-                Envie os documentos iniciais do processo. A IA irá gerar um resumo executivo a partir do conteúdo extraído.
+                Envie documentos e/ou insira o texto do processo. A IA irá gerar um resumo executivo a partir do conteúdo fornecido.
               </p>
-              <label className="block border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-green-400 transition-colors">
-                <svg className="w-10 h-10 mx-auto text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                </svg>
-                <p className="text-sm text-gray-500">Arraste arquivos aqui ou <span style={{ color: '#009C60' }}>clique para selecionar</span></p>
-                <p className="text-xs text-gray-400 mt-1">PDF, DOCX, ODT, imagens (máx. 50 MB cada)</p>
-                <input
-                  type="file"
-                  multiple
-                  accept=".pdf,.docx,.odt,.jpg,.jpeg,.png"
-                  className="hidden"
-                  onChange={(e) => setUploadFiles(Array.from(e.target.files ?? []))}
+
+              {/* Texto manual */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Texto do processo</label>
+                <textarea
+                  value={resumoManualText}
+                  onChange={(e) => setResumoManualText(e.target.value)}
+                  placeholder="Cole ou digite o conteúdo do processo aqui…"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-green-500/30"
+                  rows={5}
                 />
-              </label>
+              </div>
+
+              {/* Upload de arquivos */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Documentos</label>
+                <label className="block border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer hover:border-green-400 transition-colors">
+                  <svg className="w-8 h-8 mx-auto text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                  <p className="text-sm text-gray-500">Arraste arquivos ou <span style={{ color: '#009C60' }}>clique para selecionar</span></p>
+                  <p className="text-xs text-gray-400 mt-1">PDF, DOCX, ODT, imagens (máx. 50 MB cada)</p>
+                  <input
+                    type="file"
+                    multiple
+                    accept=".pdf,.docx,.odt,.jpg,.jpeg,.png"
+                    className="hidden"
+                    onChange={(e) => setUploadFiles(Array.from(e.target.files ?? []))}
+                  />
+                </label>
+              </div>
+
               {uploadFiles.length > 0 && (
                 <div className="space-y-2">
                   {uploadFiles.map((f, i) => (
@@ -702,11 +750,19 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
                       <span className="flex-1 truncate text-gray-700">{f.name}</span>
-                      <span className="text-gray-400 text-xs">{(f.size / 1024).toFixed(0)} KB</span>
+                      <button
+                        onClick={() => setUploadFiles(uploadFiles.filter((_, j) => j !== i))}
+                        className="text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
                   ))}
                 </div>
               )}
+
               {generatingResume && (
                 <div>
                   <div className="flex items-center gap-2 text-sm text-blue-600 mb-2">
@@ -731,7 +787,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
               </button>
               <button
                 onClick={handleGenerateResume}
-                disabled={uploadFiles.length === 0 || generatingResume}
+                disabled={(uploadFiles.length === 0 && !resumoManualText.trim()) || generatingResume}
                 className="flex-1 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50"
                 style={{ background: '#29ABE2' }}
               >

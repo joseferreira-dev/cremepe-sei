@@ -184,6 +184,12 @@ export async function getProcess(id: string): Promise<Process> {
   return mapProcess(data);
 }
 
+export async function findProcessByNumero(numeroSei: string): Promise<Process | null> {
+  const data = await request<{ processes: BackendProcess[] }>(`/processes?search=${encodeURIComponent(numeroSei)}&limit=1`);
+  const found = data.processes?.find((p) => p.numeroSei === numeroSei);
+  return found ? mapProcess(found) : null;
+}
+
 export async function createProcess(numeroSei: string): Promise<Process> {
   const data = await request<BackendProcess>('/processes', {
     method: 'POST',
@@ -231,10 +237,12 @@ export async function batchImport(
 
 export async function generateSummary(
   id: string,
-  files: File[]
+  files: File[],
+  textoManual?: string
 ): Promise<{ resumo: string }> {
   const form = new FormData();
   files.forEach((f) => form.append('files', f));
+  if (textoManual) form.append('textoManual', textoManual);
   return request(`/processes/${id}/resumo`, { method: 'POST', body: form });
 }
 
