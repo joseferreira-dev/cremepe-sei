@@ -5,7 +5,7 @@ import { unlink, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { prisma } from "../db/prisma.js";
 import { authMiddleware } from "../middleware/auth.js";
-import { consultarProcedimento } from "../services/sei.js";
+import { consultarProcedimento, listarAndamentos, listarUnidades } from "../services/sei.js";
 import { gerarResumo } from "../services/gemini.js";
 import { extrairTexto } from "../services/fileExtractor.js";
 import { AppError } from "../utils/errors.js";
@@ -102,6 +102,10 @@ router.get("/", async (req: Request, res: Response) => {
       assuntos: JSON.parse(p.assuntos || "[]"),
       interessados: JSON.parse(p.interessados || "[]"),
       unidadeAtual: p.unidadeAtual ? JSON.parse(p.unidadeAtual) : null,
+      unidades: JSON.parse(p.unidades || "[]"),
+      andamentos: JSON.parse(p.andamentos || "[]"),
+      procedimentosRelacionados: JSON.parse(p.procedimentosRelacionados || "[]"),
+      procedimentosAnexados: JSON.parse(p.procedimentosAnexados || "[]"),
       ultimoAndamento: p.ultimoAndamento ? JSON.parse(p.ultimoAndamento) : null,
       tags: p.tags.map((pt) => pt.tag),
     }));
@@ -142,12 +146,46 @@ router.get("/:id", async (req: Request, res: Response) => {
       assuntos: JSON.parse(process.assuntos || "[]"),
       interessados: JSON.parse(process.interessados || "[]"),
       unidadeAtual: process.unidadeAtual ? JSON.parse(process.unidadeAtual) : null,
+      unidades: JSON.parse(process.unidades || "[]"),
+      andamentos: JSON.parse(process.andamentos || "[]"),
+      procedimentosRelacionados: JSON.parse(process.procedimentosRelacionados || "[]"),
+      procedimentosAnexados: JSON.parse(process.procedimentosAnexados || "[]"),
       ultimoAndamento: process.ultimoAndamento ? JSON.parse(process.ultimoAndamento) : null,
       tags: process.tags.map((pt) => pt.tag),
     });
   } catch (error) {
     console.error("[PROCESSES] Get error:", error);
     res.status(500).json({ error: "Erro ao buscar processo." });
+  }
+});
+
+// List all andamentos (movements) of a process from SEI
+router.get("/:id/andamentos", async (req: Request, res: Response) => {
+  try {
+    const process = await prisma.process.findUnique({ where: { id: req.params.id } });
+    if (!process) {
+      res.status(404).json({ error: "Processo não encontrado." });
+      return;
+    }
+
+    let unidades;
+    try {
+      unidades = await listarUnidades();
+    } catch {
+      res.status(500).json({ error: "Erro ao listar unidades do SEI." });
+      return;
+    }
+
+    if (unidades.length === 0) {
+      res.json({ andamentos: [] });
+      return;
+    }
+
+    const andamentos = await listarAndamentos(process.numeroSei, unidades);
+    res.json({ andamentos });
+  } catch (error: any) {
+    console.error("[ANDAMENTOS] List error:", error);
+    res.status(500).json({ error: `Erro ao listar andamentos: ${error.message}` });
   }
 });
 
@@ -175,12 +213,31 @@ router.post("/", async (req: Request, res: Response) => {
       return;
     }
 
+    const unidades = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
+      id: u.Unidade.IdUnidade,
+      sigla: u.Unidade.Sigla,
+      descricao: u.Unidade.Descricao,
+    }));
+
+    // Busca andamentos de todas as unidades abertas do processo
+    let andamentosData: any[] = [];
+    if (unidades.length > 0) {
+      try {
+        const seiUnidades = unidades.map((u) => ({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao }));
+        andamentosData = await listarAndamentos(numeroSei, seiUnidades);
+      } catch {
+        // Falha ao buscar andamentos não impede o cadastro
+      }
+    }
+
     const processo = await prisma.process.create({
       data: {
         numeroSei,
         tipo: seiData.TipoProcedimento?.Nome || null,
         especificacao: seiData.Especificacao || null,
         dataAutuacao: seiData.DataAutuacao || null,
+        nivelAcesso: seiData.NivelAcesso || null,
+        linkSei: seiData.LinkAcesso || null,
         assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
         interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
         unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({
@@ -188,6 +245,24 @@ router.post("/", async (req: Request, res: Response) => {
           sigla: seiData.UnidadeAtual.Sigla,
           descricao: seiData.UnidadeAtual.Descricao,
         }) : null,
+        unidades: JSON.stringify(unidades),
+        andamentos: JSON.stringify(andamentosData.map((a) => ({
+          id: a.IdAndamento,
+          descricao: a.Descricao,
+          dataHora: a.DataHora,
+          usuario: a.Usuario?.Nome || "",
+          unidade: a.Unidade?.Sigla || "",
+        }))),
+        procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
+          id: p.IdProcedimento,
+          numero: p.ProcedimentoFormatado,
+          tipo: p.TipoProcedimento?.Nome || "",
+        }))),
+        procedimentosAnexados: JSON.stringify((seiData.ProcedimentosAnexados || []).map((p) => ({
+          id: p.IdProcedimento,
+          numero: p.ProcedimentoFormatado,
+          tipo: p.TipoProcedimento?.Nome || "",
+        }))),
         ultimoAndamento: seiData.UltimoAndamento ? JSON.stringify({
           descricao: seiData.UltimoAndamento.Descricao,
           dataHora: seiData.UltimoAndamento.DataHora,
@@ -244,12 +319,28 @@ router.post("/import", async (req: Request, res: Response) => {
           continue;
         }
 
+        const unidadesBatch = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
+          id: u.Unidade.IdUnidade,
+          sigla: u.Unidade.Sigla,
+          descricao: u.Unidade.Descricao,
+        }));
+
+        let andamentosBatch: any[] = [];
+        if (unidadesBatch.length > 0) {
+          try {
+            const seiUnidadesBatch = unidadesBatch.map((u) => ({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao }));
+            andamentosBatch = await listarAndamentos(num, seiUnidadesBatch);
+          } catch { /* falha não impede importação */ }
+        }
+
         const processo = await prisma.process.create({
           data: {
             numeroSei: num,
             tipo: seiData.TipoProcedimento?.Nome || null,
             especificacao: seiData.Especificacao || null,
             dataAutuacao: seiData.DataAutuacao || null,
+            nivelAcesso: seiData.NivelAcesso || null,
+            linkSei: seiData.LinkAcesso || null,
             assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
             interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
             unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({
@@ -257,6 +348,24 @@ router.post("/import", async (req: Request, res: Response) => {
               sigla: seiData.UnidadeAtual.Sigla,
               descricao: seiData.UnidadeAtual.Descricao,
             }) : null,
+            unidades: JSON.stringify(unidadesBatch),
+            andamentos: JSON.stringify(andamentosBatch.map((a) => ({
+              id: a.IdAndamento,
+              descricao: a.Descricao,
+              dataHora: a.DataHora,
+              usuario: a.Usuario?.Nome || "",
+              unidade: a.Unidade?.Sigla || "",
+            }))),
+            procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
+              id: p.IdProcedimento,
+              numero: p.ProcedimentoFormatado,
+              tipo: p.TipoProcedimento?.Nome || "",
+            }))),
+            procedimentosAnexados: JSON.stringify((seiData.ProcedimentosAnexados || []).map((p) => ({
+              id: p.IdProcedimento,
+              numero: p.ProcedimentoFormatado,
+              tipo: p.TipoProcedimento?.Nome || "",
+            }))),
             ultimoAndamento: seiData.UltimoAndamento ? JSON.stringify({
               descricao: seiData.UltimoAndamento.Descricao,
               dataHora: seiData.UltimoAndamento.DataHora,
@@ -317,11 +426,27 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
       return;
     }
 
+    const unidadesSync = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
+      id: u.Unidade.IdUnidade,
+      sigla: u.Unidade.Sigla,
+      descricao: u.Unidade.Descricao,
+    }));
+
+    let andamentosSync: any[] = [];
+    if (unidadesSync.length > 0) {
+      try {
+        const seiUnidadesSync = unidadesSync.map((u) => ({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao }));
+        andamentosSync = await listarAndamentos(process.numeroSei, seiUnidadesSync);
+      } catch { /* falha não impede sincronização */ }
+    }
+
     const updated = await prisma.process.update({
       where: { id: process.id },
       data: {
         tipo: seiData.TipoProcedimento?.Nome || process.tipo,
         especificacao: seiData.Especificacao || process.especificacao,
+        nivelAcesso: seiData.NivelAcesso || process.nivelAcesso,
+        linkSei: seiData.LinkAcesso || process.linkSei,
         assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
         interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
         unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({
@@ -329,6 +454,24 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
           sigla: seiData.UnidadeAtual.Sigla,
           descricao: seiData.UnidadeAtual.Descricao,
         }) : process.unidadeAtual,
+        unidades: JSON.stringify(unidadesSync),
+        andamentos: JSON.stringify(andamentosSync.map((a) => ({
+          id: a.IdAndamento,
+          descricao: a.Descricao,
+          dataHora: a.DataHora,
+          usuario: a.Usuario?.Nome || "",
+          unidade: a.Unidade?.Sigla || "",
+        }))),
+        procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
+          id: p.IdProcedimento,
+          numero: p.ProcedimentoFormatado,
+          tipo: p.TipoProcedimento?.Nome || "",
+        }))),
+        procedimentosAnexados: JSON.stringify((seiData.ProcedimentosAnexados || []).map((p) => ({
+          id: p.IdProcedimento,
+          numero: p.ProcedimentoFormatado,
+          tipo: p.TipoProcedimento?.Nome || "",
+        }))),
         ultimoAndamento: seiData.UltimoAndamento ? JSON.stringify({
           descricao: seiData.UltimoAndamento.Descricao,
           dataHora: seiData.UltimoAndamento.DataHora,
@@ -349,7 +492,23 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
       },
     });
 
-    res.json(updated);
+    const full = await prisma.process.findUnique({
+      where: { id: process.id },
+      include: { tags: { include: { tag: true } } },
+    });
+
+    res.json({
+      ...full!,
+      assuntos: JSON.parse(full!.assuntos || "[]"),
+      interessados: JSON.parse(full!.interessados || "[]"),
+      unidadeAtual: full!.unidadeAtual ? JSON.parse(full!.unidadeAtual) : null,
+      unidades: JSON.parse(full!.unidades || "[]"),
+      andamentos: JSON.parse(full!.andamentos || "[]"),
+      procedimentosRelacionados: JSON.parse(full!.procedimentosRelacionados || "[]"),
+      procedimentosAnexados: JSON.parse(full!.procedimentosAnexados || "[]"),
+      ultimoAndamento: full!.ultimoAndamento ? JSON.parse(full!.ultimoAndamento) : null,
+      tags: full!.tags.map((pt) => pt.tag),
+    });
   } catch (error) {
     console.error("[PROCESSES] Sync error:", error);
     res.status(500).json({ error: "Erro ao sincronizar com SEI." });
@@ -384,7 +543,23 @@ router.put("/:id", async (req: Request, res: Response) => {
       }
     }
 
-    res.json(updated);
+    const full = await prisma.process.findUnique({
+      where: { id: req.params.id },
+      include: { tags: { include: { tag: true } } },
+    });
+
+    res.json({
+      ...full!,
+      assuntos: JSON.parse(full!.assuntos || "[]"),
+      interessados: JSON.parse(full!.interessados || "[]"),
+      unidadeAtual: full!.unidadeAtual ? JSON.parse(full!.unidadeAtual) : null,
+      unidades: JSON.parse(full!.unidades || "[]"),
+      andamentos: JSON.parse(full!.andamentos || "[]"),
+      procedimentosRelacionados: JSON.parse(full!.procedimentosRelacionados || "[]"),
+      procedimentosAnexados: JSON.parse(full!.procedimentosAnexados || "[]"),
+      ultimoAndamento: full!.ultimoAndamento ? JSON.parse(full!.ultimoAndamento) : null,
+      tags: full!.tags.map((pt) => pt.tag),
+    });
   } catch (error) {
     console.error("[PROCESSES] Update error:", error);
     res.status(500).json({ error: "Erro ao atualizar processo." });

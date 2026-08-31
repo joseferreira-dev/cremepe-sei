@@ -33,9 +33,14 @@ export interface Process {
   especificacao: string;
   dataAutuacao: string;
   nivelAcesso: string;
+  linkSei: string;
   assuntos: string[];
   interessados: string[];
   unidadeAtual: { id: string; sigla: string; descricao: string };
+  unidades: { id: string; sigla: string; descricao: string }[];
+  andamentos: { id: string; descricao: string; dataHora: string; usuario: string; unidade: string }[];
+  procedimentosRelacionados: { id: string; numero: string; tipo: string }[];
+  procedimentosAnexados: { id: string; numero: string; tipo: string }[];
   ultimoAndamento: { descricao: string; dataHora: string; usuario: string; unidade: string };
   status: ProcessStatus;
   resumoIa?: string;

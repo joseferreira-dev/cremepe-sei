@@ -29,10 +29,15 @@ model Process {
   especificacao     String?
   dataAutuacao      String?   @map("data_autuacao")
   nivelAcesso       String?   @map("nivel_acesso")
+  linkSei           String?   @map("link_sei")
   idHipoteseLegal   String?   @map("id_hipotese_legal")
   assuntos          String    @default("[]") // JSON array as string
   interessados      String    @default("[]") // JSON array as string
   unidadeAtual      String?   @map("unidade_atual") // JSON object as string
+  unidades          String    @default("[]") // JSON array of units as string
+  andamentos        String    @default("[]") // JSON array of andamentos (movements) as string
+  procedimentosRelacionados String @default("[]") @map("procedimentos_relacionados") // JSON array
+  procedimentosAnexados     String @default("[]") @map("procedimentos_anexados")     // JSON array
   ultimoAndamento   String?   @map("ultimo_andamento") // JSON object as string
   statusSistema     String    @default("em_analise") @map("status_sistema")
   resumoIa          String?   @map("resumo_ia")

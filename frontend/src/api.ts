@@ -104,9 +104,14 @@ interface BackendProcess {
   especificacao: string | null;
   dataAutuacao: string | null;
   nivelAcesso: string | null;
+  linkSei: string | null;
   assuntos: string[];
   interessados: string[];
   unidadeAtual: { id: string; sigla: string; descricao: string } | null;
+  unidades: { id: string; sigla: string; descricao: string }[];
+  andamentos: { id: string; descricao: string; dataHora: string; usuario: string; unidade: string }[];
+  procedimentosRelacionados: { id: string; numero: string; tipo: string }[];
+  procedimentosAnexados: { id: string; numero: string; tipo: string }[];
   ultimoAndamento: { descricao: string; dataHora: string; usuario: string; unidade: string } | null;
   statusSistema: string;
   resumoIa?: string | null;
@@ -126,9 +131,14 @@ export function mapProcess(p: BackendProcess): Process {
     especificacao: p.especificacao || '',
     dataAutuacao: p.dataAutuacao || '',
     nivelAcesso: p.nivelAcesso || '',
+    linkSei: p.linkSei || '',
     assuntos: Array.isArray(p.assuntos) ? p.assuntos : [],
     interessados: Array.isArray(p.interessados) ? p.interessados : [],
     unidadeAtual: p.unidadeAtual || { id: '', sigla: '', descricao: '' },
+    unidades: Array.isArray(p.unidades) ? p.unidades : [],
+    andamentos: Array.isArray(p.andamentos) ? p.andamentos : [],
+    procedimentosRelacionados: Array.isArray(p.procedimentosRelacionados) ? p.procedimentosRelacionados : [],
+    procedimentosAnexados: Array.isArray(p.procedimentosAnexados) ? p.procedimentosAnexados : [],
     ultimoAndamento: p.ultimoAndamento || { descricao: '', dataHora: '', usuario: '', unidade: '' },
     status: (p.statusSistema || anyP.status || 'em_analise') as Process['status'],
     resumoIa: p.resumoIa || undefined,
@@ -261,6 +271,20 @@ export async function updateAnnotation(
 
 export async function deleteAnnotation(processId: string, annotationId: string): Promise<void> {
   await request(`/processes/${processId}/annotations/${annotationId}`, { method: 'DELETE' });
+}
+
+// ---- Andamentos ----
+export interface Andamento {
+  IdAndamento: string;
+  Descricao: string;
+  DataHora: string;
+  Usuario: { Sigla: string; Nome: string } | null;
+  Unidade: { IdUnidade: string; Sigla: string; Descricao: string } | null;
+}
+
+export async function listAndamentos(processId: string): Promise<Andamento[]> {
+  const data = await request<{ andamentos: Andamento[] }>(`/processes/${processId}/andamentos`);
+  return data.andamentos || [];
 }
 
 // ---- Tags ----

@@ -140,13 +140,14 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     }
   };
 
-  const handleStatusToggle = async () => {    if (!process) return;
+  const handleStatusToggle = async () => {
+    if (!process) return;
     setStatusSaving(true);
     setStatusError('');
     try {
       const nextStatus = process.status === 'finalizado' ? 'em_analise' : 'finalizado';
-      const updated = await updateProcess(process.id, { statusSistema: nextStatus });
-      setProcess(updated);
+      await updateProcess(process.id, { statusSistema: nextStatus });
+      await getProcess(process.id).then(setProcess);
     } catch (e: any) {
       setStatusError(e?.message || 'Erro ao atualizar status.');
     } finally {
@@ -161,8 +162,8 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
       ? currentIds.filter((id) => id !== tagId)
       : [...currentIds, tagId];
     try {
-      const updated = await updateProcess(process.id, { tagIds: nextIds });
-      setProcess(updated);
+      await updateProcess(process.id, { tagIds: nextIds });
+      await getProcess(process.id).then(setProcess);
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao atualizar tags.');
     }
@@ -171,8 +172,10 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
   const tabs = [
     { id: 'sei', label: 'Dados SEI' },
     { id: 'resumo', label: 'Resumo IA' },
+    { id: 'andamentos', label: 'Andamentos' },
     { id: 'anotacoes', label: `Anotações (${annotations.length})` },
     { id: 'tags', label: 'Tags' },
+    { id: 'relacionados', label: 'Processos Relacionados' },
   ] as const;
 
   return (
@@ -200,6 +203,19 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
               </span>
               {process.nivelAcesso && (
                 <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{process.nivelAcesso}</span>
+              )}
+              {process.linkSei && (
+                <a
+                  href={process.linkSei}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-600 hover:underline bg-blue-50 px-2 py-0.5 rounded flex items-center gap-1"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  Abrir no SEI
+                </a>
               )}
             </div>
             <p className="mt-2 text-gray-700 font-medium">{process.especificacao}</p>
@@ -281,6 +297,19 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
                 <Field label="Tipo" value={process.tipo} />
                 {process.dataAutuacao && <Field label="Data de Autuação" value={formatDataPtBR(process.dataAutuacao)} />}
                 <Field label="Nível de Acesso" value={process.nivelAcesso || '—'} />
+                {process.linkSei && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Link SEI</p>
+                    <a
+                      href={process.linkSei}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-600 hover:underline break-all"
+                    >
+                      {process.linkSei}
+                    </a>
+                  </div>
+                )}
                 <div>
                   <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Assuntos</p>
                   <div className="flex flex-wrap gap-1.5">
@@ -300,12 +329,16 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
               </div>
               <div className="space-y-4">
                 <div>
-                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Unidade Atual</p>
-                  {process.unidadeAtual.sigla ? (
-                    <>
-                      <p className="text-sm font-semibold text-gray-800">{process.unidadeAtual.sigla}</p>
-                      <p className="text-xs text-gray-500">{process.unidadeAtual.descricao}</p>
-                    </>
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Unidades</p>
+                  {(process.unidades.length > 0 ? process.unidades : [process.unidadeAtual]).filter(Boolean).length > 0 ? (
+                    <div className="flex flex-col gap-1">
+                      {(process.unidades.length > 0 ? process.unidades : [process.unidadeAtual]).filter(Boolean).map((u, i) => (
+                        <div key={i}>
+                          <p className="text-sm font-semibold text-gray-800">{u.sigla}</p>
+                          <p className="text-xs text-gray-500">{u.descricao}</p>
+                        </div>
+                      ))}
+                    </div>
                   ) : <span className="text-xs text-gray-400">—</span>}
                 </div>
                 <div>
@@ -364,6 +397,53 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
                   </svg>
                   <p className="text-sm">Nenhum resumo gerado ainda.</p>
                   <p className="text-xs mt-1">Clique em "Gerar Resumo com IA" e envie os documentos iniciais do processo.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Andamentos */}
+          {tab === 'andamentos' && (
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-4" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                Histórico de Andamentos
+              </h3>
+              {process.andamentos.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  <svg className="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-sm">Nenhum andamento registrado neste processo.</p>
+                  <p className="text-xs mt-1">Faça uma sincronização para buscar os andamentos no SEI.</p>
+                </div>
+              ) : (
+                <div className="space-y-0">
+                  {process.andamentos.map((and, idx) => (
+                    <div key={and.id || idx} className="flex gap-4">
+                      <div className="flex flex-col items-center">
+                        <div className="w-3 h-3 rounded-full border-2 border-white shrink-0" style={{ background: '#009C60' }} />
+                        {idx < process.andamentos.length - 1 && <div className="w-0.5 flex-1 bg-gray-200" />}
+                      </div>
+                      <div className="pb-6 flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-mono text-gray-400">
+                            {formatDataPtBR(and.dataHora, true)}
+                          </span>
+                          {and.unidade && (
+                            <span className="text-xs font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                              {and.unidade}
+                            </span>
+                          )}
+                          {and.usuario && (
+                            <span className="text-xs text-gray-500">
+                              — {and.usuario}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-700 mt-1 leading-relaxed">{and.descricao}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -504,6 +584,79 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Processos Relacionados */}
+          {tab === 'relacionados' && (
+            <div>
+              {/* Processos anexados (filhos) */}
+              <div className="mb-6">
+                <h3 className="font-semibold text-gray-800 mb-3" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                  Processos Anexados
+                </h3>
+                <p className="text-xs text-gray-500 mb-3">Processos que estão anexados (incluídos) neste processo:</p>
+                {process.procedimentosAnexados.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">Nenhum processo anexado.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {process.procedimentosAnexados.map((p) => (
+                      <div key={p.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: '#E0F2FE' }}>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#0369A1" strokeWidth={1.8}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-mono font-semibold text-gray-800">{p.numero}</p>
+                          {p.tipo && <p className="text-xs text-gray-500 truncate">{p.tipo}</p>}
+                        </div>
+                        <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">Anexado</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Processos que incluem este ( pais ) */}
+              <div>
+                <h3 className="font-semibold text-gray-800 mb-3" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                  Processos que incluem este
+                </h3>
+                <p className="text-xs text-gray-500 mb-3">Processos nos quais este processo está anexado:</p>
+                {(() => {
+                  // Os processos "pai" estão em ProcedimentosRelacionados mas NÃO em ProcedimentosAnexados
+                  const anexadosIds = new Set(process.procedimentosAnexados.map((p) => p.id));
+                  const pais = process.procedimentosRelacionados.filter((p) => !anexadosIds.has(p.id));
+                  return pais.length === 0 ? (
+                    <p className="text-sm text-gray-400 italic">Não está anexado em nenhum outro processo.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {pais.map((p) => (
+                        <div key={p.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: '#FEF3C7' }}>
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#92400E" strokeWidth={1.8}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                            </svg>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-mono font-semibold text-gray-800">{p.numero}</p>
+                            {p.tipo && <p className="text-xs text-gray-500 truncate">{p.tipo}</p>}
+                          </div>
+                          <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">Processo pai</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {process.procedimentosRelacionados.length === 0 && process.procedimentosAnexados.length === 0 && (
+                <div className="text-center py-8 text-gray-400">
+                  <p className="text-sm">Nenhum processo relacionado encontrado.</p>
+                  <p className="text-xs mt-1">Faça uma sincronização para buscar os dados no SEI.</p>
+                </div>
+              )}
             </div>
           )}
         </div>

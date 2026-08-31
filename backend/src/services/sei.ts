@@ -23,6 +23,7 @@ export interface SeiProcesso {
   Especificacao: string;
   DataAutuacao: string;
   LinkAcesso: string;
+  NivelAcesso: string;
   TipoProcedimento: { IdTipoProcedimento: string; Nome: string } | null;
   AndamentoGeracao: {
     Descricao: string;
@@ -42,8 +43,8 @@ export interface SeiProcesso {
   Assuntos: { CodigoEstruturado: string; Descricao: string }[];
   Interessados: { Sigla: string; Nome: string }[];
   Observacoes: any[];
-  ProcedimentosRelacionados: any[];
-  ProcedimentosAnexados: any[];
+  ProcedimentosRelacionados: ProcedimentoResumido[];
+  ProcedimentosAnexados: ProcedimentoResumido[];
   // Extensão CFM: não documentada no v3.1 mas presente em respostas reais
   UnidadeAtual: { IdUnidade: string; Sigla: string; Descricao: string } | null;
 }
@@ -52,6 +53,12 @@ export interface Unidade {
   IdUnidade: string;
   Sigla: string;
   Descricao: string;
+}
+
+export interface ProcedimentoResumido {
+  IdProcedimento: string;
+  ProcedimentoFormatado: string;
+  TipoProcedimento: { IdTipoProcedimento: string; Nome: string } | null;
 }
 
 const NS_RE = "(?:[\\w.-]*:)?";
@@ -283,6 +290,45 @@ function parseAndamento(xml: string, tag: string): any {
   };
 }
 
+/** Parseia lista de ProcedimentoResumido (usado em ProcedimentosRelacionados e Anexados) */
+function parseProcedimentosResumidos(body: string, tag: string): ProcedimentoResumido[] {
+  const result: ProcedimentoResumido[] = [];
+  const sectionRe = new RegExp(`<${NS_RE}${tag}\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}${tag}>`);
+  const sectionMatch = body.match(sectionRe);
+  if (!sectionMatch) return result;
+
+  const inner = sectionMatch[1];
+  const itemRe = new RegExp(`<${NS_RE}item\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}item>`, "g");
+  let im;
+  while ((im = itemRe.exec(inner)) !== null) {
+    const item = im[1];
+    const get = (t: string) => {
+      const m = item.match(new RegExp(`<${NS_RE}${t}\\b[^>]*>([^<]*)<\\/${NS_RE}${t}>`));
+      return m ? m[1].trim() : "";
+    };
+
+    // TipoProcedimento pode ser nested
+    let tipo: ProcedimentoResumido["TipoProcedimento"] = null;
+    const tipoBlock = item.match(new RegExp(`<${NS_RE}TipoProcedimento\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}TipoProcedimento>`));
+    if (tipoBlock) {
+      const ti = tipoBlock[1];
+      const idM = ti.match(new RegExp(`<${NS_RE}IdTipoProcedimento\\b[^>]*>([^<]*)<\\/${NS_RE}IdTipoProcedimento>`));
+      const nomeM = ti.match(new RegExp(`<${NS_RE}Nome\\b[^>]*>([^<]*)<\\/${NS_RE}Nome>`));
+      tipo = {
+        IdTipoProcedimento: idM ? idM[1].trim() : "",
+        Nome: nomeM ? nomeM[1].trim() : "",
+      };
+    }
+
+    result.push({
+      IdProcedimento: get("IdProcedimento"),
+      ProcedimentoFormatado: get("ProcedimentoFormatado"),
+      TipoProcedimento: tipo,
+    });
+  }
+  return result;
+}
+
 function parseSoapResponse(xml: string): SeiProcesso {
   // Check for SOAP fault
   const faultMatch = xml.match(/<faultstring>([\s\S]*?)<\/faultstring>/);
@@ -345,6 +391,32 @@ function parseSoapResponse(xml: string): SeiProcesso {
     }
   }
 
+  // Parse UnidadesProcedimentoAberto: lista de unidades onde o processo está aberto
+  const unidadesAbertas: SeiProcesso["UnidadesProcedimentoAberto"] = [];
+  const uaListRe = new RegExp(`<${NS_RE}UnidadesProcedimentoAberto\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}UnidadesProcedimentoAberto>`);
+  const uaListMatch = body.match(uaListRe);
+  if (uaListMatch) {
+    const uaBody = uaListMatch[1];
+    const itemRe = new RegExp(`<${NS_RE}item\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}item>`, "g");
+    let uim;
+    while ((uim = itemRe.exec(uaBody)) !== null) {
+      const inner = uim[1];
+      const unidadeBlock = inner.match(new RegExp(`<${NS_RE}Unidade\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}Unidade>`));
+      const bloco = unidadeBlock ? unidadeBlock[1] : inner;
+      const get = (t: string) => {
+        const m = bloco.match(new RegExp(`<${NS_RE}${t}\\b[^>]*>([^<]*)<\\/${NS_RE}${t}>`));
+        return m ? m[1].trim() : "";
+      };
+      unidadesAbertas.push({
+        Unidade: {
+          IdUnidade: get("IdUnidade"),
+          Sigla: get("Sigla"),
+          Descricao: get("Descricao"),
+        },
+      });
+    }
+  }
+
   // Parse UnidadeAtual (CFM extension, not in v3.1 spec)
   let unidadeAtual: SeiProcesso["UnidadeAtual"] = null;
   const uaBlock = body.match(
@@ -368,16 +440,17 @@ function parseSoapResponse(xml: string): SeiProcesso {
       getTag(body, "ProcedimentoFormatado") || getTag(body, "ProtocoloProcedimento"),
     Especificacao: getTag(body, "Especificacao"),
     DataAutuacao: getTag(body, "DataAutuacao"),
-    LinkAcesso: getTag(body, "LinkAcesso"),
+    LinkAcesso: getTag(body, "LinkAcesso").replace(/&amp;/g, "&"),
+    NivelAcesso: formatNivelAcesso(getTag(body, "NivelAcessoLocal"), getTag(body, "NivelAcessoGlobal")),
     TipoProcedimento: tipoProcedimento,
     AndamentoGeracao: parseAndamento(body, "AndamentoGeracao"),
     UltimoAndamento: parseAndamento(body, "UltimoAndamento"),
-    UnidadesProcedimentoAberto: [], // parsed below
+    UnidadesProcedimentoAberto: unidadesAbertas,
     Assuntos: assuntos,
     Interessados: interessados,
     Observacoes: [],
-    ProcedimentosRelacionados: [],
-    ProcedimentosAnexados: [],
+    ProcedimentosRelacionados: parseProcedimentosResumidos(body, "ProcedimentosRelacionados"),
+    ProcedimentosAnexados: parseProcedimentosResumidos(body, "ProcedimentosAnexados"),
     UnidadeAtual: unidadeAtual,
   };
 }
@@ -421,4 +494,184 @@ export async function consultarProcedimento(
   }
 
   throw lastError || new Error("Processo não encontrado no SEI.");
+}
+
+export interface Andamento {
+  IdAndamento: string;
+  Descricao: string;
+  DataHora: string;
+  Usuario: { Sigla: string; Nome: string } | null;
+  Unidade: { IdUnidade: string; Sigla: string; Descricao: string } | null;
+}
+
+function buildListarAndamentosEnvelope(
+  idUnidade: string,
+  protocoloProcedimento: string
+): string {
+  // IDs de tarefas internas do SEI (reservadas < 1000). Envia um amplo
+  // conjunto para obter todos os tipos de andamento.
+  const tarefas = Array.from({ length: 50 }, (_, i) => i + 1);
+  const tarefasXml = tarefas
+    .map((t) => `<item xsi:type="xsd:string">${t}</item>`)
+    .join("\n        ");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:sei="Sei">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <sei:listarAndamentos soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+      <SiglaSistema>${env.SEI_SIGLA_SISTEMA}</SiglaSistema>
+      <IdentificacaoServico>${env.SEI_IDENTIFICACAO_SERVICO}</IdentificacaoServico>
+      <IdUnidade>${idUnidade}</IdUnidade>
+      <ProtocoloProcedimento>${protocoloProcedimento}</ProtocoloProcedimento>
+      <Tarefas xsi:type="sei:ArrayOfTarefas">
+        ${tarefasXml}
+      </Tarefas>
+      <SinRetornarAtributos xsi:type="xsd:string">N</SinRetornarAtributos>
+    </sei:listarAndamentos>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+}
+
+function parseAndamentos(xml: string): Andamento[] {
+  const andamentos: Andamento[] = [];
+
+  // Tenta múltiplos wrappers: <return>, <parametros>, ou o corpo inteiro
+  const returnMatch = xml.match(/<(?:\w[\w.-]*:)?return\s*>([\s\S]*?)<\/(?:\w[\w.-]*:)?return\s*>/);
+  const paramMatch = xml.match(/<(?:\w[\w.-]*:)?parametros[^>]*>([\s\S]*?)<\/(?:\w[\w.-]*:)?parametros\s*>/);
+  const body = returnMatch ? returnMatch[1] : paramMatch ? paramMatch[1] : xml;
+
+  const itemRe = new RegExp(`<${NS_RE}item\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}item>`, "g");
+  let im;
+  while ((im = itemRe.exec(body)) !== null) {
+    const inner = im[1];
+    const get = (t: string) => {
+      const m = inner.match(new RegExp(`<${NS_RE}${t}\\b[^>]*>([^<]*)<\\/${NS_RE}${t}>`));
+      return m ? m[1].trim() : "";
+    };
+
+    const unidadeBlock = inner.match(new RegExp(`<${NS_RE}Unidade\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}Unidade>`));
+    let unidade = null;
+    if (unidadeBlock) {
+      const ui = unidadeBlock[1];
+      const uidM = ui.match(new RegExp(`<${NS_RE}IdUnidade\\b[^>]*>([^<]*)<\\/${NS_RE}IdUnidade>`));
+      const sigM = ui.match(new RegExp(`<${NS_RE}Sigla\\b[^>]*>([^<]*)<\\/${NS_RE}Sigla>`));
+      const descM = ui.match(new RegExp(`<${NS_RE}Descricao\\b[^>]*>([^<]*)<\\/${NS_RE}Descricao>`));
+      unidade = {
+        IdUnidade: uidM ? uidM[1].trim() : "",
+        Sigla: sigM ? sigM[1].trim() : "",
+        Descricao: descM ? descM[1].trim() : "",
+      };
+    }
+
+    const usuarioBlock = inner.match(new RegExp(`<${NS_RE}Usuario\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}Usuario>`));
+    let usuario = null;
+    if (usuarioBlock) {
+      const ui = usuarioBlock[1];
+      const sigM = ui.match(new RegExp(`<${NS_RE}Sigla\\b[^>]*>([^<]*)<\\/${NS_RE}Sigla>`));
+      const nomM = ui.match(new RegExp(`<${NS_RE}Nome\\b[^>]*>([^<]*)<\\/${NS_RE}Nome>`));
+      usuario = {
+        Sigla: sigM ? sigM[1].trim() : "",
+        Nome: nomM ? nomM[1].trim() : "",
+      };
+    }
+
+    andamentos.push({
+      IdAndamento: get("IdAndamento"),
+      Descricao: stripHtml(get("Descricao")),
+      DataHora: get("DataHora"),
+      Usuario: usuario,
+      Unidade: unidade,
+    });
+  }
+
+  return andamentos;
+}
+
+/**
+ * Lista todos os andamentos de um processo, buscando em todas as unidades
+ * onde ele está aberto. Retorna a lista consolidada e ordenada por data.
+ */
+export async function listarAndamentos(
+  numeroProcesso: string,
+  unidades: Unidade[]
+): Promise<Andamento[]> {
+  const allAndamentos: Andamento[] = [];
+
+  for (const unidade of unidades) {
+    try {
+      const soapBody = buildListarAndamentosEnvelope(unidade.IdUnidade, numeroProcesso);
+      const xml = await fetchSoap(soapBody, "Sei#listarAndamentos");
+
+      if (xml.includes("<faultstring>")) {
+        continue; // Unidade não tem acesso, ignora
+      }
+
+      const andamentos = parseAndamentos(xml);
+      allAndamentos.push(...andamentos);
+    } catch {
+      // Falha ao buscar andamentos desta unidade, ignora
+    }
+  }
+
+  // Remove duplicatas por IdAndamento e ordena por data (mais recente primeiro)
+  const seen = new Set<string>();
+  const unique = allAndamentos.filter((a) => {
+    if (seen.has(a.IdAndamento)) return false;
+    seen.add(a.IdAndamento);
+    return true;
+  });
+
+  unique.sort((a, b) => {
+    const da = parseSEIDate(a.DataHora);
+    const db = parseSEIDate(b.DataHora);
+    return db - da;
+  });
+
+  return unique;
+}
+
+/** Converte data SEI "DD/MM/AAAA HH:mm:ss" para timestamp numérico */
+function parseSEIDate(s: string): number {
+  if (!s) return 0;
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (m) {
+    const [, d, mo, y, hh, mm, ss] = m;
+    return new Date(`${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}T${hh.padStart(2, "0")}:${mm}:${ss || "00"}`).getTime();
+  }
+  return new Date(s).getTime() || 0;
+}
+
+/** Decodifica entidades HTML comuns (&lt; &gt; &amp; &quot; &apos;) */
+function decodeHtmlEntities(s: string): string {
+  if (!s) return s;
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
+}
+
+/** Remove tags HTML de uma string, preservando só o texto */
+function stripHtml(s: string): string {
+  if (!s) return s;
+  return decodeHtmlEntities(s).replace(/<[^>]*>/g, "").trim();
+}
+
+/** Converte código numérico de nível de acesso SEI em texto legível */
+function formatNivelAcesso(local: string, global_: string): string {
+  // NivelAcessoGlobal é o campo decisório:
+  //   0 = Público (acesso irrestrito)
+  //   1 = Restrito (acesso controlado)
+  const code = global_ || local;
+  const map: Record<string, string> = {
+    "0": "Público",
+    "1": "Restrito",
+  };
+  return map[code] || `Código ${code}`;
 }

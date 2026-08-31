@@ -215,13 +215,12 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer whitespace-nowrap" onClick={() => toggleSort('numeroSei')}>
                   Número SEI <SortIcon col="numeroSei" />
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer" onClick={() => toggleSort('especificacao')}>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer min-w-[260px]" onClick={() => toggleSort('especificacao')}>
                   Especificação <SortIcon col="especificacao" />
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Interessados</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Unidade</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Unidades</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Resumo IA</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[200px]">Resumo IA</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer whitespace-nowrap" onClick={() => toggleSort('dataAutuacao')}>
                   Autuação <SortIcon col="dataAutuacao" />
                 </th>
@@ -231,13 +230,13 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={8} className="px-4 py-12 text-center text-gray-400 text-sm">
                     Carregando processos…
                   </td>
                 </tr>
               ) : sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={8} className="px-4 py-12 text-center text-gray-400 text-sm">
                     Nenhum processo encontrado com os filtros aplicados.
                   </td>
                 </tr>
@@ -263,8 +262,8 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
                         {p.numeroSei}
                       </button>
                     </td>
-                    <td className="px-4 py-3 max-w-[220px]">
-                      <p className="text-gray-800 truncate text-xs">{p.especificacao}</p>
+                    <td className="px-4 py-3 max-w-[320px]">
+                      <p className="text-gray-800 text-xs leading-relaxed line-clamp-2">{p.especificacao}</p>
                       <div className="flex gap-1 mt-1">
                         {p.tags.map((t) => (
                           <span key={t.id} className="inline-block px-1.5 py-0.5 rounded text-white text-[10px] font-medium" style={{ background: t.color }}>
@@ -273,14 +272,14 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
                         ))}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-600 max-w-[160px]">
-                      <p className="truncate">{p.interessados[0]}</p>
-                      {p.interessados.length > 1 && <p className="text-gray-400">+{p.interessados.length - 1}</p>}
-                    </td>
                     <td className="px-4 py-3">
-                      <span className="text-xs font-mono font-semibold text-gray-700 bg-gray-100 px-2 py-0.5 rounded">
-                        {p.unidadeAtual.sigla}
-                      </span>
+                      <div className="flex flex-col gap-0.5">
+                        {(p.unidades.length > 0 ? p.unidades : [p.unidadeAtual]).filter(Boolean).map((u, i) => (
+                          <span key={i} className="text-xs font-mono font-semibold text-gray-700 bg-gray-100 px-2 py-0.5 rounded inline-block w-fit">
+                            {u.sigla}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -290,9 +289,9 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
                         {cfg.label}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 max-w-[240px]">
                       {p.resumoIa ? (
-                        <p className="text-xs text-gray-600 max-w-[160px] truncate">{p.resumoIa}</p>
+                        <p className="text-xs text-gray-600 leading-relaxed line-clamp-3">{p.resumoIa}</p>
                       ) : (
                         <span className="text-xs text-gray-400 italic">Sem resumo</span>
                       )}
