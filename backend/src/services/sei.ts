@@ -107,6 +107,27 @@ function buildListarUnidadesEnvelope(): string {
 </soapenv:Envelope>`;
 }
 
+function buildConsultarDocumentoEnvelope(protocoloDocumento: string, idUnidade: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:sei="Sei">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <sei:consultarDocumento soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+      <SiglaSistema>${env.SEI_SIGLA_SISTEMA}</SiglaSistema>
+      <IdentificacaoServico>${env.SEI_IDENTIFICACAO_SERVICO}</IdentificacaoServico>
+      <IdUnidade>${idUnidade}</IdUnidade>
+      <ProtocoloDocumento>${protocoloDocumento}</ProtocoloDocumento>
+      <SinRetornarAssinaturas xsi:type="xsd:string">N</SinRetornarAssinaturas>
+      <SinRetornarPublicacao xsi:type="xsd:string">N</SinRetornarPublicacao>
+      <SinRetornarDetalhes xsi:type="xsd:string">S</SinRetornarDetalhes>
+    </sei:consultarDocumento>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+}
+
 /** Executa uma chamada SOAP ao SEI e devolve o XML da resposta. */
 async function fetchSoap(soapBody: string, soapAction: string): Promise<string> {
   const response = await fetch(env.SEI_URL, {
@@ -813,4 +834,159 @@ function formatNivelAcesso(local: string, global_: string): string {
     "1": "Restrito",
   };
   return map[code] || `Código ${code}`;
+}
+
+export interface SeiDocumento {
+  IdDocumento: string;
+  DocumentoFormatado: string;
+  NomeSerie: string;
+  DataDocumento: string;
+  Descricao: string;
+  LinkAcesso: string;
+  Unidade: { IdUnidade: string; Sigla: string; Descricao: string } | null;
+}
+
+function parseSoapDocumento(xml: string): SeiDocumento {
+  const returnMatch = xml.match(/<(?:\w[\w.-]*:)?return\s*>([\s\S]*?)<\/(?:\w[\w.-]*:)?return\s*>/);
+  const body = returnMatch ? returnMatch[1] : xml;
+
+  if (body.includes("<faultstring>")) {
+    const faultMatch = body.match(/<faultstring>([\s\S]*?)<\/faultstring>/);
+    throw new Error(faultMatch ? faultMatch[1].trim() : "Erro SOAP desconhecido");
+  }
+
+  if (!body.includes("IdDocumento")) {
+    throw new Error("Documento não encontrado no SEI.");
+  }
+
+  const serieMatch = body.match(new RegExp(`<${NS_RE}Serie\\b[^>]*>[\\s\\S]*?<${NS_RE}Nome\\b[^>]*>([^<]*)<\\/${NS_RE}Nome>[\\s\\S]*?<\\/${NS_RE}Serie>`));
+  const nomeArvore = getTag(body, "NomeArvore");
+  const data = getTag(body, "Data");
+
+  const descNilMatch = body.match(new RegExp(`<${NS_RE}Descricao\\b[^>]*xsi:nil="true"[^>]*/>`));
+  const descricaoRaw = getTag(body, "Descricao");
+  const descricao = descNilMatch ? "" : (descricaoRaw.includes("<") ? "" : descricaoRaw);
+
+  return {
+    IdDocumento: getTag(body, "IdDocumento"),
+    DocumentoFormatado: getTag(body, "DocumentoFormatado"),
+    NomeSerie: serieMatch ? serieMatch[1].trim() : "",
+    DataDocumento: data,
+    Descricao: descricao || nomeArvore,
+    LinkAcesso: getTag(body, "LinkAcesso").replace(/&amp;/g, "&"),
+    Unidade: (() => {
+      const uaMatch = body.match(new RegExp(`<${NS_RE}UnidadeElaboradora\\b[^>]*>[\\s\\S]*?<\\/${NS_RE}UnidadeElaboradora>`));
+      if (uaMatch) {
+        const idM = uaMatch[0].match(new RegExp(`<${NS_RE}IdUnidade\\b[^>]*>([^<]*)<\\/${NS_RE}IdUnidade>`));
+        const sigM = uaMatch[0].match(new RegExp(`<${NS_RE}Sigla\\b[^>]*>([^<]*)<\\/${NS_RE}Sigla>`));
+        const descM = uaMatch[0].match(new RegExp(`<${NS_RE}Descricao\\b[^>]*>([^<]*)<\\/${NS_RE}Descricao>`));
+        if (idM) {
+          return { IdUnidade: idM[1].trim(), Sigla: sigM?.[1]?.trim() || "", Descricao: descM?.[1]?.trim() || "" };
+        }
+      }
+      return null;
+    })(),
+  };
+}
+
+export async function consultarDocumento(
+  protocoloDocumento: string,
+  idUnidade: string
+): Promise<SeiDocumento> {
+  const soapBody = buildConsultarDocumentoEnvelope(protocoloDocumento, idUnidade);
+  const xml = await fetchSoap(soapBody, "Sei#consultarDocumento");
+  return parseSoapDocumento(xml);
+}
+
+export async function obterLinkDocumento(
+  protocoloDocumento: string
+): Promise<string | null> {
+  let unidades: Unidade[];
+  if (env.SEI_ID_UNIDADE) {
+    unidades = [{ IdUnidade: env.SEI_ID_UNIDADE, Sigla: env.SEI_ID_UNIDADE, Descricao: "" }];
+  } else {
+    try {
+      unidades = await listarUnidades();
+    } catch {
+      return null;
+    }
+  }
+
+  const cremepeUnidades = unidades.filter((u) => u.Sigla.startsWith("CREMEPE"));
+
+  for (const unidade of cremepeUnidades) {
+    try {
+      const doc = await consultarDocumento(protocoloDocumento, unidade.IdUnidade);
+      return doc.LinkAcesso;
+    } catch {
+      // Unidade não tem acesso, tenta a próxima
+    }
+  }
+
+  return null;
+}
+
+export async function consultarDocumentoFromLink(
+  linkAcesso: string
+): Promise<ArrayBuffer> {
+  const url = linkAcesso.startsWith("http") ? linkAcesso : `${env.SEI_URL.replace(/\/ws\/.*$/, "")}${linkAcesso}`;
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!response.ok) {
+    throw new Error(`Erro ao baixar documento: ${response.status} ${response.statusText}`);
+  }
+  return response.arrayBuffer();
+}
+
+export interface DocumentoFromAndamento {
+  idDocumento: string;
+  tipo: string;
+  descricao: string;
+}
+
+export function extrairDocumentos(andamentos: Andamento[]): DocumentoFromAndamento[] {
+  const docs = new Map<string, DocumentoFromAndamento>();
+
+  const patterns: { regex: RegExp; tipo: string; extractor: (m: RegExpMatchArray) => { id: string; desc: string } }[] = [
+    {
+      regex: /Documento\s+(\d+)\s+\(([^)]+)\)\s+inserido/i,
+      tipo: "inserido",
+      extractor: (m) => ({ id: m[1], desc: m[2] }),
+    },
+    {
+      regex: /Exclus[aã]o do documento\s+(\d+)/i,
+      tipo: "excluido",
+      extractor: (m) => ({ id: m[1], desc: "Documento excluído" }),
+    },
+    {
+      regex: /Gerado documento\s+(p[uú]blico|restrito)?\s*(\d+)/i,
+      tipo: "gerado",
+      extractor: (m) => ({ id: m[2], desc: `Documento ${m[1] || "gerado"}` }),
+    },
+    {
+      regex: /Registro de documento\s+(externo|interno)?\s*(p[uú]blico|restrito)?\s*(\d+)\s*\(([^)]*)\)/i,
+      tipo: "registrado",
+      extractor: (m) => ({ id: m[3], desc: m[4] }),
+    },
+    {
+      regex: /Documento\s+(\d+)\s+\(([^)]+)\)/i,
+      tipo: "referenciado",
+      extractor: (m) => ({ id: m[1], desc: m[2] }),
+    },
+  ];
+
+  for (const andamento of andamentos) {
+    for (const { regex, tipo, extractor } of patterns) {
+      const matches = andamento.Descricao.matchAll(new RegExp(regex.source, "gi"));
+      for (const match of matches) {
+        const { id, desc } = extractor(match as any);
+        if (!docs.has(id)) {
+          docs.set(id, { idDocumento: id, tipo, descricao: desc });
+        }
+      }
+    }
+  }
+
+  return Array.from(docs.values());
 }

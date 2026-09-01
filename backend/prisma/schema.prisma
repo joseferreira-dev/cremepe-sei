@@ -52,6 +52,7 @@ model Process {
   unidadeAtual      String?   @map("unidade_atual") // JSON object as string
   unidades          String    @default("[]") // JSON array of units as string
   andamentos        String    @default("[]") // JSON array of andamentos (movements) as string
+  documentos        String    @default("[]") // JSON array of documents extracted from andamentos
   procedimentosRelacionados String @default("[]") @map("procedimentos_relacionados") // JSON array
   procedimentosAnexados     String @default("[]") @map("procedimentos_anexados")     // JSON array
   ultimoAndamento   String?   @map("ultimo_andamento") // JSON object as string

@@ -320,6 +320,22 @@ export async function listAndamentos(processId: string): Promise<Andamento[]> {
   return data.andamentos || [];
 }
 
+export interface DocumentoFromAndamento {
+  idDocumento: string;
+  tipo: string;
+  descricao: string;
+}
+
+export async function listDocumentos(processId: string): Promise<DocumentoFromAndamento[]> {
+  const data = await request<{ documentos: DocumentoFromAndamento[] }>(`/processes/${processId}/documentos`);
+  return data.documentos || [];
+}
+
+export async function getDocumentoLink(processId: string, numeroDocumento: string): Promise<string> {
+  const data = await request<{ link: string }>(`/processes/${processId}/documentos/${numeroDocumento}/link`);
+  return data.link;
+}
+
 // ---- Tags ----
 export async function listTags(): Promise<Tag[]> {
   return request<Tag[]>('/tags');

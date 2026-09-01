@@ -5,7 +5,8 @@ import { unlink, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { prisma } from "../db/prisma.js";
 import { authMiddleware } from "../middleware/auth.js";
-import { consultarProcedimento, listarAndamentos, listarUnidades, isProcessoConcluido } from "../services/sei.js";
+import { consultarProcedimento, listarAndamentos, listarUnidades, isProcessoConcluido, consultarDocumento, extrairDocumentos, obterLinkDocumento } from "../services/sei.js";
+import type { DocumentoFromAndamento } from "../services/sei.js";
 import { gerarResumo } from "../services/gemini.js";
 import { extrairTexto } from "../services/fileExtractor.js";
 import { AppError } from "../utils/errors.js";
@@ -31,6 +32,33 @@ const upload = multer({
 });
 
 const router = Router();
+
+// Rota de teste pública (remover depois)
+router.get("/test-documento/:idDocumento", async (req: Request, res: Response) => {
+  try {
+    const { idDocumento } = req.params;
+    const unidades = await listarUnidades();
+    let lastError: any = null;
+
+    for (const unidade of unidades) {
+      try {
+        const doc = await consultarDocumento(idDocumento, unidade.IdUnidade);
+        res.json({
+          documento: doc,
+          unidadeConsulta: unidade.Sigla,
+        });
+        return;
+      } catch (err: any) {
+        lastError = err;
+      }
+    }
+
+    res.status(404).json({ error: `Documento não encontrado: ${lastError?.message}` });
+  } catch (error: any) {
+    console.error("[TEST] Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 router.use(authMiddleware);
 
@@ -249,6 +277,39 @@ router.get("/:id/andamentos", async (req: Request, res: Response) => {
   }
 });
 
+// List documents extracted from andamentos
+router.get("/:id/documentos", async (req: Request, res: Response) => {
+  try {
+    const process = await prisma.process.findUnique({ where: { id: req.params.id } });
+    if (!process) {
+      res.status(404).json({ error: "Processo não encontrado." });
+      return;
+    }
+
+    const documentos = JSON.parse(process.documentos || "[]");
+    res.json({ documentos });
+  } catch (error: any) {
+    console.error("[DOCUMENTOS] List error:", error);
+    res.status(500).json({ error: `Erro ao listar documentos: ${error.message}` });
+  }
+});
+
+// Get direct link to a document in SEI
+router.get("/:id/documentos/:numeroDocumento/link", async (req: Request, res: Response) => {
+  try {
+    const { numeroDocumento } = req.params;
+    const link = await obterLinkDocumento(numeroDocumento);
+    if (!link) {
+      res.status(404).json({ error: "Link do documento não encontrado no SEI." });
+      return;
+    }
+    res.json({ link });
+  } catch (error: any) {
+    console.error("[DOCUMENTOS] Link error:", error);
+    res.status(500).json({ error: `Erro ao obter link: ${error.message}` });
+  }
+});
+
 // Create process manually
 router.post("/", async (req: Request, res: Response) => {
   try {
@@ -304,6 +365,8 @@ router.post("/", async (req: Request, res: Response) => {
       }
     }
 
+    const documentosInitial = extrairDocumentos(andamentosData as any);
+
     // Detecta se processo está concluído
     const concluido = isProcessoConcluido(
       unidades,
@@ -336,6 +399,7 @@ router.post("/", async (req: Request, res: Response) => {
           usuario: a.Usuario?.Nome || "",
           unidade: a.Unidade?.Sigla || "",
         }))),
+        documentos: JSON.stringify(documentosInitial),
         procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
           id: p.IdProcedimento,
           numero: p.ProcedimentoFormatado,
@@ -430,6 +494,8 @@ router.post("/import", async (req: Request, res: Response) => {
           } catch { /* falha não impede importação */ }
         }
 
+        const documentosBatch = extrairDocumentos(andamentosBatch as any);
+
         const concluidoBatch = isProcessoConcluido(
           unidadesBatch,
           seiData.UltimoAndamento ? { descricao: seiData.UltimoAndamento.Descricao } : null,
@@ -461,6 +527,7 @@ router.post("/import", async (req: Request, res: Response) => {
               usuario: a.Usuario?.Nome || "",
               unidade: a.Unidade?.Sigla || "",
             }))),
+            documentos: JSON.stringify(documentosBatch),
             procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
               id: p.IdProcedimento,
               numero: p.ProcedimentoFormatado,
@@ -545,6 +612,22 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
       } catch { /* falha não impede sincronização */ }
     }
 
+    const documentosExistentes: DocumentoFromAndamento[] = JSON.parse(process.documentos || "[]");
+    const andamentosParaExtrair = andamentosSync.map((a) => ({
+      IdAndamento: a.IdAndamento,
+      Descricao: a.Descricao,
+      DataHora: a.DataHora,
+      Usuario: a.Usuario ? { Sigla: a.Usuario.Sigla || "", Nome: a.Usuario.Nome || "" } : null,
+      Unidade: a.Unidade ? { IdUnidade: a.Unidade.IdUnidade || "", Sigla: a.Unidade.Sigla || "", Descricao: a.Unidade.Descricao || "" } : null,
+    }));
+    const novosDocumentos = extrairDocumentos(andamentosParaExtrair as any);
+    const docsMap = new Map<string, DocumentoFromAndamento>();
+    for (const d of documentosExistentes) docsMap.set(d.idDocumento, d);
+    for (const d of novosDocumentos) {
+      if (!docsMap.has(d.idDocumento)) docsMap.set(d.idDocumento, d);
+    }
+    const documentosFinais = Array.from(docsMap.values());
+
     // Detecta se processo está concluído
     const andamentosSyncParsed = andamentosSync.map((a) => ({
       id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora,
@@ -600,6 +683,7 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
           usuario: a.Usuario?.Nome || "",
           unidade: a.Unidade?.Sigla || "",
         }))),
+        documentos: JSON.stringify(documentosFinais),
         procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
           id: p.IdProcedimento,
           numero: p.ProcedimentoFormatado,
