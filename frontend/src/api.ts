@@ -271,6 +271,10 @@ export async function generateSummary(
   return request(`/processes/${id}/resumo`, { method: 'POST', body: form });
 }
 
+export async function generateSummaryFromDocs(id: string): Promise<{ resumo: string }> {
+  return request(`/processes/${id}/resumo-documentos`, { method: 'POST' });
+}
+
 export async function getSummary(
   id: string
 ): Promise<{ resumoIa: string | null; resumoGeradoEm: string | null }> {

@@ -21,7 +21,7 @@ const upload = multer({
   dest: UPLOAD_DIR,
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const allowed = [".pdf", ".docx", ".odt", ".txt", ".jpg", ".jpeg", ".png"];
+    const allowed = [".pdf", ".doc", ".docx", ".odt", ".txt", ".xls", ".xlsx", ".csv", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp"];
     const ext = "." + file.originalname.split(".").pop()?.toLowerCase();
     if (allowed.includes(ext)) {
       cb(null, true);
@@ -310,6 +310,7 @@ router.get("/:id/documentos/:numeroDocumento/link", async (req: Request, res: Re
   }
 });
 
+// Get document content (HTML or download link)
 // Create process manually
 router.post("/", async (req: Request, res: Response) => {
   try {
@@ -894,6 +895,7 @@ router.get("/:id/resumo", async (req: Request, res: Response) => {
   }
 });
 
+// Generate AI summary from SEI documents (first 3 oldest)
 // Annotations
 router.post("/:id/annotations", async (req: Request, res: Response) => {
   try {
