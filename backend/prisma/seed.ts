@@ -24,9 +24,8 @@ async function main() {
   // Create default users
   const users = [
     { name: "Ana Paula Ferreira", email: "ana.ferreira@cremepe.org.br", role: "admin" },
-    { name: "Carlos Eduardo Silva", email: "carlos.silva@cremepe.org.br", role: "protocolo" },
+    { name: "Carlos Eduardo Silva", email: "carlos.silva@cremepe.org.br", role: "assistente" },
     { name: "Mariana Costa", email: "mariana.costa@cremepe.org.br", role: "analista" },
-    { name: "Roberto Alves", email: "roberto.alves@cremepe.org.br", role: "gestor" },
   ];
 
   const defaultPassword = await bcrypt.hash("123456", 12);

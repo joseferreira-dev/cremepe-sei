@@ -44,7 +44,7 @@ router.post("/users", async (req: Request, res: Response) => {
     const passwordHash = authSource === "ad" ? "" : await bcrypt.hash(password, 12);
 
     const user = await prisma.user.create({
-      data: { name, email, passwordHash, role: role || "analista", authSource: authSource === "ad" ? "ad" : "local" },
+      data: { name, email, passwordHash, role: role || "assistente", authSource: authSource === "ad" ? "ad" : "local" },
       select: { id: true, name: true, email: true, role: true, authSource: true, active: true, createdAt: true },
     });
 

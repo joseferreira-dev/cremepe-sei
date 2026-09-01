@@ -52,6 +52,12 @@ router.get("/", async (req: Request, res: Response) => {
     const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
     const skip = (pageNum - 1) * limitNum;
 
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    const userRole = user?.role || "assistente";
+
+    const userUnits = await prisma.userUnit.findMany({ where: { userId: req.user!.userId } });
+    const userUnitSiglas = userUnits.map((u) => u.unitSigla);
+
     const where: any = {};
 
     if (search) {
@@ -69,7 +75,7 @@ router.get("/", async (req: Request, res: Response) => {
     }
 
     if (unit && unit !== "all") {
-      where.unidadeAtual = { contains: `"Sigla":"${unit}"` };
+      where.unidadeAtual = { contains: `"sigla":"${unit}"` };
     }
 
     if (resumo === "1") {
@@ -77,6 +83,24 @@ router.get("/", async (req: Request, res: Response) => {
       where.resumoIa = { not: "" };
     } else if (resumo === "0") {
       where.resumoIa = null;
+    }
+
+    if (userRole !== "admin") {
+      if (userRole === "assistente") {
+        if (userUnitSiglas.length === 0) {
+          where.id = "__NO_ACCESS__";
+        } else {
+          const userUnitConditions = userUnitSiglas.map((sigla) => ({
+            unidades: { contains: `"sigla":"${sigla}"` },
+          }));
+          if (where.OR) {
+            where.AND = [{ OR: where.OR }, { OR: userUnitConditions }];
+            delete where.OR;
+          } else {
+            where.OR = userUnitConditions;
+          }
+        }
+      }
     }
 
     const orderBy: any = {};
@@ -139,6 +163,42 @@ router.get("/:id", async (req: Request, res: Response) => {
     if (!process) {
       res.status(404).json({ error: "Processo não encontrado." });
       return;
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    const userRole = user?.role || "assistente";
+
+    if (userRole !== "admin") {
+      const userUnits = await prisma.userUnit.findMany({ where: { userId: req.user!.userId } });
+      const userUnitSiglas = userUnits.map((u) => u.unitSigla);
+
+      const processUnidades = JSON.parse(process.unidades || "[]");
+      const processUnidadeAtual = process.unidadeAtual ? JSON.parse(process.unidadeAtual) : null;
+      const allProcessSiglas = [
+        ...processUnidades.map((u: any) => u.sigla),
+        ...(processUnidadeAtual?.sigla ? [processUnidadeAtual.sigla] : []),
+      ];
+      const isInUserUnits = allProcessSiglas.some((s: string) => userUnitSiglas.includes(s));
+
+      if (userRole === "assistente") {
+        if (!isInUserUnits) {
+          res.status(403).json({ error: "Acesso negado a este processo." });
+          return;
+        }
+      } else if (userRole === "analista") {
+        if (process.nivelAcesso?.includes("Restrito") && !isInUserUnits) {
+          const unidades = JSON.parse(process.unidades || "[]");
+          res.json({
+            id: process.id,
+            numeroSei: process.numeroSei,
+            nivelAcesso: process.nivelAcesso,
+            statusSistema: process.statusSistema,
+            unidades,
+            acessoRestrito: true,
+          });
+          return;
+        }
+      }
     }
 
     res.json({
@@ -205,6 +265,12 @@ router.post("/", async (req: Request, res: Response) => {
       return;
     }
 
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    const userRole = user?.role || "assistente";
+
+    const userUnits = await prisma.userUnit.findMany({ where: { userId: req.user!.userId } });
+    const userUnitSiglas = userUnits.map((u) => u.unitSigla);
+
     let seiData;
     try {
       seiData = await consultarProcedimento(numeroSei);
@@ -218,6 +284,14 @@ router.post("/", async (req: Request, res: Response) => {
       sigla: u.Unidade.Sigla,
       descricao: u.Unidade.Descricao,
     }));
+
+    if (userRole !== "admin") {
+      const hasAccess = unidades.some((u) => userUnitSiglas.includes(u.sigla));
+      if (!hasAccess) {
+        res.status(403).json({ error: "Processo não encontrado nas suas unidades vinculadas." });
+        return;
+      }
+    }
 
     // Busca andamentos de todas as unidades abertas do processo
     let andamentosData: any[] = [];
@@ -309,6 +383,12 @@ router.post("/import", async (req: Request, res: Response) => {
       return;
     }
 
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    const userRole = user?.role || "assistente";
+
+    const userUnits = await prisma.userUnit.findMany({ where: { userId: req.user!.userId } });
+    const userUnitSiglas = userUnits.map((u) => u.unitSigla);
+
     const results: { numero: string; status: string; mensagem: string; processId?: string }[] = [];
 
     for (const numero of numeros) {
@@ -333,6 +413,14 @@ router.post("/import", async (req: Request, res: Response) => {
           sigla: u.Unidade.Sigla,
           descricao: u.Unidade.Descricao,
         }));
+
+        if (userRole !== "admin") {
+          const hasAccess = unidadesBatch.some((u: any) => userUnitSiglas.includes(u.sigla));
+          if (!hasAccess) {
+            results.push({ numero: num, status: "error", mensagem: "Processo não encontrado nas suas unidades vinculadas." });
+            continue;
+          }
+        }
 
         let andamentosBatch: any[] = [];
         if (unidadesBatch.length > 0) {

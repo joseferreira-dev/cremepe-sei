@@ -5,7 +5,6 @@ import Dashboard from './components/Dashboard';
 import ProcessList from './components/ProcessList';
 import ProcessDetails from './components/ProcessDetails';
 import NewProcess from './components/NewProcess';
-import ImportBatch from './components/ImportBatch';
 import TagsManager from './components/TagsManager';
 import Admin from './components/Admin';
 import Reports from './components/Reports';
@@ -13,7 +12,7 @@ import SyncPage from './components/SyncPage';
 import Profile from './components/Profile';
 import { DialogProvider } from './components/ui/Dialog';
 import type { User } from './types';
-import { login as apiLogin, loadStoredUser, clearSession, getToken } from './api';
+import { login as apiLogin, loadStoredUser, clearSession, getToken, fetchMe } from './api';
 
 export type Page =
   | 'dashboard'
@@ -21,7 +20,6 @@ export type Page =
   | 'processes-sem-resumo'
   | 'process-details'
   | 'new-process'
-  | 'import'
   | 'tags'
   | 'reports'
   | 'sync'
@@ -38,6 +36,17 @@ export default function App() {
     window.addEventListener('cremepe-unauthorized', onUnauthorized);
     return () => window.removeEventListener('cremepe-unauthorized', onUnauthorized);
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        fetchMe().then(setUser).catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [!!user]);
 
   const handleLogin = async (email: string, password: string): Promise<string | null> => {
     try {
@@ -77,8 +86,6 @@ export default function App() {
         return <ProcessDetails processId={selectedProcessId} navigateTo={navigateTo} user={user} />;
       case 'new-process':
         return <NewProcess navigateTo={navigateTo} />;
-      case 'import':
-        return <ImportBatch navigateTo={navigateTo} />;
       case 'tags':
         return <TagsManager />;
       case 'reports':
@@ -86,7 +93,7 @@ export default function App() {
       case 'sync':
         return <SyncPage navigateTo={navigateTo} />;
       case 'admin':
-        return <Admin user={user} />;
+        return <Admin user={user} onUserUpdated={setUser} />;
       case 'profile':
         return <Profile user={user} />;
       default:

@@ -157,8 +157,7 @@ export default function Dashboard({ navigateTo }: Props) {
       {/* Quick actions */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Novo Processo', desc: 'Cadastrar manualmente', page: 'new-process' as Page, color: '#009C60', icon: 'M12 4v16m8-8H4' },
-          { label: 'Importar Lote', desc: 'Via SEI', page: 'import' as Page, color: '#29ABE2', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' },
+          { label: 'Cadastrar Processo', desc: 'Via SEI', page: 'new-process' as Page, color: '#009C60', icon: 'M12 4v16m8-8H4' },
           { label: 'Sincronização', desc: 'Atualizar dados do SEI', page: 'sync' as Page, color: '#6366F1', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
           { label: 'Relatórios', desc: 'Análise consolidada', page: 'reports' as Page, color: '#8DC63F', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
         ].map((action) => (

@@ -1,166 +1,201 @@
 import { useState } from 'react';
 import type { Page } from '../App';
-import { createProcess } from '../api';
-import type { Process } from '../types';
-import { formatDataPtBR } from '../utils/date';
+import { batchImport } from '../api';
 
 interface Props {
-  navigateTo: (page: Page, id?: string) => void;
+  navigateTo: (page: Page) => void;
 }
 
+interface ImportResult {
+  numero: string;
+  status: 'success' | 'error' | 'skipped';
+  mensagem: string;
+}
+
+const SEI_REGEX = /\d{2}\.\d{2}\.\d{9}-\d/g;
+
+function extractSeiNumbers(text: string): string[] {
+  const matches = text.match(SEI_REGEX) || [];
+  return [...new Set(matches)];
+}
+
+const PLACEHOLDER = `Cole os números dos processos (o sistema extrai automaticamente):
+
+26.17.000008588-9
+25.17.000009817-9
+26.17.000009307-5
+26.17.000010045-1
+26.17.000009336-9`;
+
 export default function NewProcess({ navigateTo }: Props) {
-  const [numero, setNumero] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [found, setFound] = useState<Process | null>(null);
-  const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
+  const [inputText, setInputText] = useState('');
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [results, setResults] = useState<ImportResult[] | null>(null);
 
-  const SEI_REGEX = /^\d{2}\.\d{2}\.\d{9}-\d$/;
+  const detectedNumbers = extractSeiNumbers(inputText);
 
-  const handleSearch = async () => {
-    if (!SEI_REGEX.test(numero.trim())) {
-      setError('Número inválido. Use o formato XX.XX.XXXXXXXXX-X');
-      return;
-    }
-    setError('');
-    setLoading(true);
-    try {
-      const result = await createProcess(numero.trim());
-      setFound(result);
-    } catch (e: any) {
-      setError(e?.message || 'Processo não encontrado no SEI. Verifique o número e tente novamente.');
-    } finally {
-      setLoading(false);
-    }
+  const handleImport = async () => {
+    if (!detectedNumbers.length) return;
+
+    setRunning(true);
+    setProgress(0);
+
+    const res = await batchImport(detectedNumbers);
+    let done = 0;
+    const interval = setInterval(() => {
+      done = Math.min(detectedNumbers.length, done + 1);
+      setProgress(Math.round((done / detectedNumbers.length) * 100));
+      if (done >= detectedNumbers.length) clearInterval(interval);
+    }, 150);
+
+    setResults(res.results.map((r) => ({
+      numero: r.numero,
+      status: (r.status === 'success' ? 'success' : r.status === 'skipped' ? 'skipped' : 'error') as ImportResult['status'],
+      mensagem: r.mensagem,
+    })));
+    setRunning(false);
+    clearInterval(interval);
   };
 
-  const handleSave = async () => {
-    setLoading(true);
-    if (found) {
-      navigateTo('process-details', found.id);
-    } else {
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    setLoading(false);
-    setSaved(true);
-    setTimeout(() => navigateTo('processes'), 800);
-  };
+  const successes = results?.filter((r) => r.status === 'success' || r.status === 'skipped').length ?? 0;
+  const errors = results?.filter((r) => r.status === 'error').length ?? 0;
 
   return (
-    <div className="p-8 max-w-2xl" style={{ fontFamily: "'Inter', sans-serif" }}>
+    <div className="p-8 max-w-3xl" style={{ fontFamily: "'Inter', sans-serif" }}>
       <div className="flex items-center gap-2 text-sm text-gray-500 mb-6">
         <button onClick={() => navigateTo('processes')} className="hover:underline" style={{ color: '#009C60' }}>
           Processos
         </button>
         <span>/</span>
-        <span>Novo Processo</span>
+        <span>Cadastrar Processo</span>
       </div>
 
       <h1 className="text-2xl font-bold text-gray-900 mb-1" style={{ fontFamily: "'Outfit', sans-serif" }}>
-        Cadastrar Novo Processo
+        Cadastrar Processo
       </h1>
       <p className="text-gray-500 text-sm mb-8">
-        Informe o número do processo no SEI para buscar e importar seus dados automaticamente.
+        Cole os números dos processos no SEI para buscar e importar seus dados automaticamente.
       </p>
 
-      <div className="bg-white rounded-xl border border-gray-100 p-6 space-y-5">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
-            Número do Processo SEI
-          </label>
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={numero}
-              onChange={(e) => { setNumero(e.target.value); setError(''); setFound(null); }}
-              placeholder="26.17.000008588-9"
-              className="flex-1 border border-gray-200 rounded-lg px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500/30"
+      {!results ? (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl border border-gray-100 p-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Números dos Processos SEI
+            </label>
+            <textarea
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder={PLACEHOLDER}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500/30 resize-none"
+              rows={8}
             />
-            <button
-              onClick={handleSearch}
-              disabled={loading || !numero.trim()}
-              className="px-5 py-2.5 text-white font-medium text-sm rounded-lg disabled:opacity-60 transition-colors"
-              style={{ background: '#009C60' }}
-            >
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                  Buscando…
-                </span>
-              ) : 'Buscar no SEI'}
-            </button>
-          </div>
-          <p className="text-xs text-gray-400 mt-1.5">Formato: XX.XX.XXXXXXXXX-X</p>
-        </div>
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-center gap-2">
-            <svg className="w-4 h-4 text-red-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <p className="text-red-700 text-sm">{error}</p>
-          </div>
-        )}
-
-        {found && (
-          <div className="border border-green-200 rounded-xl overflow-hidden">
-            <div className="bg-green-50 px-4 py-3 flex items-center gap-2 border-b border-green-100">
-              <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-sm font-semibold text-green-700">Processo encontrado no SEI</span>
-            </div>
-            <div className="p-5 space-y-3">
-              {[
-                ['Número', found.numeroSei],
-                ['Tipo', found.tipo],
-                ['Especificação', found.especificacao],
-                ['Autuação', formatDataPtBR(found.dataAutuacao)],
-                ['Nível de Acesso', found.nivelAcesso],
-                ['Interessados', found.interessados.join(', ')],
-                ['Unidade Atual', `${found.unidadeAtual.sigla} – ${found.unidadeAtual.descricao}`],
-                ['Último Andamento', found.ultimoAndamento.descricao],
-              ].map(([label, value]) => (
-                <div key={label} className="grid grid-cols-3 gap-2 text-sm">
-                  <span className="text-gray-500 font-medium">{label}</span>
-                  <span className="col-span-2 text-gray-800 font-mono text-xs">{value}</span>
+            {detectedNumbers.length > 0 && (
+              <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                <p className="text-xs font-semibold text-gray-600 mb-2">
+                  {detectedNumbers.length} processo(s) detectado(s):
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {detectedNumbers.map((num) => (
+                    <span key={num} className="px-2 py-1 bg-green-50 text-green-700 text-xs font-mono rounded-md border border-green-200">
+                      {num}
+                    </span>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
-        )}
 
-        {found && !saved && (
+          {running && (
+            <div className="bg-white rounded-xl border border-gray-100 p-5">
+              <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
+                <svg className="w-4 h-4 animate-spin" style={{ color: '#009C60' }} fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Consultando SEI e importando processos… {progress}%
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-2">
+                <div
+                  className="h-2 rounded-full transition-all duration-300"
+                  style={{ background: '#009C60', width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           <button
-            onClick={handleSave}
-            disabled={loading}
-            className="w-full py-3 text-white font-semibold text-sm rounded-lg disabled:opacity-60 transition-colors"
+            onClick={handleImport}
+            disabled={running || detectedNumbers.length === 0}
+            className="px-6 py-3 text-white font-semibold text-sm rounded-lg disabled:opacity-50 transition-colors"
             style={{ background: '#009C60' }}
           >
-            {loading ? 'Cadastrando…' : 'Cadastrar Processo'}
+            {running ? 'Importando…' : `Importar ${detectedNumbers.length} Processo(s)`}
           </button>
-        )}
-
-        {saved && (
-          <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-center">
-            <p className="text-green-700 font-medium text-sm">Processo cadastrado com sucesso! Redirecionando…</p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { label: 'Total', value: results.length, color: '#374151', bg: '#F9FAFB' },
+              { label: 'Importados', value: successes, color: '#065F46', bg: '#D1FAE5' },
+              { label: 'Falhas', value: errors, color: '#991B1B', bg: '#FEE2E2' },
+            ].map((item) => (
+              <div key={item.label} className="bg-white border border-gray-100 rounded-xl p-5 text-center">
+                <p className="text-3xl font-bold" style={{ color: item.color, fontFamily: "'Outfit', sans-serif" }}>{item.value}</p>
+                <p className="text-xs text-gray-500 mt-1 uppercase tracking-wide font-medium">{item.label}</p>
+              </div>
+            ))}
           </div>
-        )}
-      </div>
 
-      <div className="mt-6 bg-blue-50 border border-blue-100 rounded-xl p-5">
-        <p className="text-xs font-semibold text-blue-700 mb-1">Dica: importação em lote</p>
-        <p className="text-xs text-blue-600">
-          Para cadastrar vários processos de uma vez, use a funcionalidade de{' '}
-          <button onClick={() => navigateTo('import')} className="font-semibold underline">
-            Importar Lote
-          </button>
-          . Você pode colar uma lista de números ou enviar um arquivo CSV.
-        </p>
-      </div>
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Número SEI</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Mensagem</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r) => (
+                  <tr key={r.numero} className="border-b border-gray-50">
+                    <td className="px-4 py-3 font-mono text-xs text-gray-800">{r.numero}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className="text-xs font-medium px-2 py-0.5 rounded-full"
+                        style={r.status === 'success'
+                          ? { color: '#065F46', background: '#D1FAE5' }
+                          : { color: '#991B1B', background: '#FEE2E2' }}
+                      >
+                        {r.status === 'success' ? 'Sucesso' : 'Erro'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-600">{r.mensagem}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => { setResults(null); setInputText(''); }}
+              className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+            >
+              Nova Importação
+            </button>
+            <button
+              onClick={() => navigateTo('processes')}
+              className="px-4 py-2 text-sm font-medium rounded-lg text-white"
+              style={{ background: '#009C60' }}
+            >
+              Ver todos os processos
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

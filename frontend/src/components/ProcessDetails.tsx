@@ -22,7 +22,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
   const dialog = useDialog();
   const [process, setProcess] = useState<Process | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [tab, setTab] = useState<'sei' | 'resumo' | 'anotacoes' | 'tags'>('sei');
+  const [tab, setTab] = useState<'sei' | 'resumo' | 'andamentos' | 'anotacoes' | 'tags' | 'relacionados'>('sei');
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [newAnnotation, setNewAnnotation] = useState('');
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
@@ -60,6 +60,8 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
       </div>
     );
   }
+
+  const acessoRestrito = (process as any).acessoRestrito === true;
 
   const cfg = statusConfig[process.status];
 
@@ -175,7 +177,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     }
   };
 
-  const tabs = [
+  const allTabs = [
     { id: 'sei', label: 'Dados SEI' },
     { id: 'resumo', label: 'Resumo IA' },
     { id: 'andamentos', label: 'Andamentos' },
@@ -183,6 +185,8 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     { id: 'tags', label: 'Tags' },
     { id: 'relacionados', label: 'Processos Relacionados' },
   ] as const;
+
+  const tabs = allTabs;
 
   const handleClickRelated = async (numero: string) => {
     const existing = await findProcessByNumero(numero);
@@ -215,11 +219,22 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
       </div>
 
       {/* Header */}
+      {acessoRestrito && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2">
+          <svg className="w-4 h-4 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <p className="text-amber-800 text-sm">
+            Acesso restrito —可视化受限，仅可查看基本信息。
+          </p>
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border border-gray-100 p-6">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="font-mono text-lg font-bold text-gray-800">{process.numeroSei}</span>
+            <div className="flex items-center gap-3 flex-wrap mb-2">
+              <span className="font-mono text-xl font-bold text-gray-800">{process.numeroSei}</span>
               <span
                 className="text-xs font-semibold px-2.5 py-1 rounded-full"
                 style={{ color: cfg.color, background: cfg.bg }}
@@ -229,70 +244,65 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
               {process.nivelAcesso && (
                 <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{process.nivelAcesso}</span>
               )}
-              {process.linkSei && (
-                <a
-                  href={process.linkSei}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-600 hover:underline bg-blue-50 px-2 py-0.5 rounded flex items-center gap-1"
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                  </svg>
-                  Abrir no SEI
-                </a>
-              )}
             </div>
-            <p className="mt-2 text-gray-700 font-medium">{process.especificacao}</p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="text-gray-700 font-medium mb-1">{process.especificacao}</p>
+            <p className="text-xs text-gray-500">
               {process.tipo}
               {process.dataAutuacao && ` · Autuado em ${formatDataPtBR(process.dataAutuacao)}`}
             </p>
+            {process.tags.length > 0 && (
+              <div className="flex gap-2 mt-3">
+                {process.tags.map((t) => (
+                  <span key={t.id} className="text-white text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: t.color }}>
+                    {t.name}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={handleSync}
-              disabled={syncLoading}
-              className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60"
-            >
-              <svg className={`w-4 h-4 ${syncLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              {syncLoading ? 'Sincronizando…' : 'Sincronizar com SEI'}
-            </button>
-            <button
-              onClick={handleStatusToggle}
-              disabled={statusSaving}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-white font-medium disabled:opacity-60"
-              style={{ background: '#009C60' }}
-            >
-              {process.status === 'finalizado' ? 'Reabrir Processo' : 'Marcar como Finalizado'}
-            </button>
-            {user?.role === 'admin' && (
-              <button
-                onClick={handleDelete}
-                className="flex items-center gap-1.5 px-3 py-2 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50 transition-colors"
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            {process.linkSei && (
+              <a
+                href={process.linkSei}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90"
+                style={{ background: '#29ABE2' }}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                 </svg>
-                Excluir
-              </button>
+                Abrir no SEI
+              </a>
+            )}
+            {!acessoRestrito && (
+              <>
+                <button
+                  onClick={handleSync}
+                  disabled={syncLoading}
+                  className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60"
+                >
+                  <svg className={`w-4 h-4 ${syncLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  {syncLoading ? 'Sincronizando…' : 'Sincronizar'}
+                </button>
+                {user?.role === 'admin' && (
+                  <button
+                    onClick={handleDelete}
+                    className="flex items-center gap-1.5 px-3 py-2 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Excluir
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
         {statusError && <p className="text-red-600 text-sm mt-2">{statusError}</p>}
-
-        {/* Tags */}
-        {process.tags.length > 0 && (
-          <div className="flex gap-2 mt-4">
-            {process.tags.map((t) => (
-              <span key={t.id} className="text-white text-xs font-medium px-2.5 py-1 rounded-full" style={{ background: t.color }}>
-                {t.name}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Tabs */}

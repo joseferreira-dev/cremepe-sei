@@ -5,9 +5,8 @@ import { useDialog } from './ui/Dialog';
 
 const roleLabels: Record<string, string> = {
   admin: 'Administrador',
-  protocolo: 'Protocolo',
+  assistente: 'Assistente',
   analista: 'Analista',
-  gestor: 'Gestor',
 };
 
 interface Props {

@@ -6,16 +6,16 @@ import { useDialog } from './ui/Dialog';
 
 const roleLabels: Record<string, string> = {
   admin: 'Administrador',
-  protocolo: 'Protocolo',
+  assistente: 'Assistente',
   analista: 'Analista',
-  gestor: 'Gestor',
 };
 
 interface Props {
   user: User;
+  onUserUpdated: (user: User) => void;
 }
 
-export default function Admin({ user }: Props) {
+export default function Admin({ user, onUserUpdated }: Props) {
   const dialog = useDialog();
   const [section, setSection] = useState<'users' | 'sei' | 'logs'>('users');
   const [users, setUsers] = useState<User[]>([]);
@@ -24,7 +24,7 @@ export default function Admin({ user }: Props) {
   const [logsLoading, setLogsLoading] = useState(true);
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'protocolo', authSource: 'local' as 'local' | 'ad', active: true });
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'assistente', authSource: 'local' as 'local' | 'ad', active: true });
   const [saving, setSaving] = useState(false);
   const [seiConfig, setSeiConfig] = useState({
     siglaSistema: 'IntWeb',
@@ -61,7 +61,7 @@ export default function Admin({ user }: Props) {
 
   const openNewUser = () => {
     setEditingUser(null);
-    setForm({ name: '', email: '', password: '', role: 'protocolo', authSource: 'local', active: true });
+    setForm({ name: '', email: '', password: '', role: 'assistente', authSource: 'local', active: true });
     setShowUserModal(true);
   };
 
@@ -87,6 +87,9 @@ export default function Admin({ user }: Props) {
         if (form.password) payload.password = form.password;
         const updated = await updateUser(editingUser.id, payload);
         setUsers(users.map((x) => (x.id === editingUser.id ? updated : x)));
+        if (editingUser.id === user.id) {
+          onUserUpdated(updated);
+        }
       } else {
         const created = await createUser({ name: form.name, email: form.email, password: form.password || '', role: form.role, authSource: form.authSource });
         setUsers([...users, created]);
@@ -172,7 +175,7 @@ export default function Admin({ user }: Props) {
                       <div className="flex items-center gap-2">
                         <div
                           className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0"
-                          style={{ background: u.role === 'admin' ? '#009C60' : u.role === 'gestor' ? '#29ABE2' : '#8DC63F' }}
+                          style={{ background: u.role === 'admin' ? '#009C60' : '#8DC63F' }}
                         >
                           {u.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
                         </div>
@@ -412,9 +415,8 @@ export default function Admin({ user }: Props) {
                   onChange={(e) => setForm({ ...form, role: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500/30"
                 >
-                  <option value="protocolo">Protocolo</option>
+                  <option value="assistente">Assistente</option>
                   <option value="analista">Analista</option>
-                  <option value="gestor">Gestor</option>
                   <option value="admin">Administrador</option>
                 </select>
               </div>

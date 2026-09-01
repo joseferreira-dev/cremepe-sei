@@ -4,6 +4,7 @@ import {
   useContext,
   useRef,
   useState,
+  useMemo,
   type ReactNode,
 } from 'react';
 
@@ -48,36 +49,27 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const openDialog = useCallback(
-    (options: DialogOptions) => open(options),
-    [open]
-  );
-  openDialog.alert = useCallback(
-    (message: ReactNode, title = 'Aviso') =>
-      open({ title, message, variant: 'alert', confirmLabel: 'OK' }).then(() => {}),
-    [open]
-  );
-  openDialog.success = useCallback(
-    (message: ReactNode, title = 'Sucesso') =>
-      open({ title, message, variant: 'success', confirmLabel: 'OK' }).then(() => {}),
-    [open]
-  );
-  openDialog.error = useCallback(
-    (message: ReactNode, title = 'Erro') =>
-      open({ title, message, variant: 'error', confirmLabel: 'OK' }).then(() => {}),
-    [open]
-  );
-  openDialog.confirm = useCallback(
-    (message: ReactNode, options: Partial<DialogOptions> = {}) => {
-      const isDestructive = options.variant === 'confirm';
-      return open({
-        title: options.title ?? 'Confirmar',
-        message,
-        variant: options.variant ?? 'confirm',
-        confirmLabel: options.confirmLabel ?? 'Confirmar',
-        cancelLabel: options.cancelLabel ?? 'Cancelar',
-        ...(isDestructive ? {} : {}),
-      });
+  const openDialog = useMemo(
+    () => {
+      const fn = ((options: DialogOptions) => open(options)) as OpenDialog;
+      fn.alert = (message: ReactNode, title = 'Aviso') =>
+        open({ title, message, variant: 'alert', confirmLabel: 'OK' }).then(() => {});
+      fn.success = (message: ReactNode, title = 'Sucesso') =>
+        open({ title, message, variant: 'success', confirmLabel: 'OK' }).then(() => {});
+      fn.error = (message: ReactNode, title = 'Erro') =>
+        open({ title, message, variant: 'error', confirmLabel: 'OK' }).then(() => {});
+      fn.confirm = (message: ReactNode, options: Partial<DialogOptions> = {}) => {
+        const isDestructive = options.variant === 'confirm';
+        return open({
+          title: options.title ?? 'Confirmar',
+          message,
+          variant: options.variant ?? 'confirm',
+          confirmLabel: options.confirmLabel ?? 'Confirmar',
+          cancelLabel: options.cancelLabel ?? 'Cancelar',
+          ...(isDestructive ? {} : {}),
+        });
+      };
+      return fn;
     },
     [open]
   );

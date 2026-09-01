@@ -106,7 +106,7 @@ router.post("/login", async (req: Request, res: Response) => {
         email: `${username}@cremepe.org.br`,
         passwordHash: "",
         authSource: "ad",
-        role: "analista",
+        role: "assistente",
       },
     });
 
