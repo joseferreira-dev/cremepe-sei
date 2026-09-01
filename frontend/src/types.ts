@@ -5,8 +5,17 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  authSource: 'local' | 'ad';
   active: boolean;
   createdAt: string;
+  units?: UserUnit[];
+}
+
+export interface UserUnit {
+  id: string;
+  unitId: string;
+  unitSigla: string;
+  unitDesc: string;
 }
 
 export type ProcessStatus = 'em_andamento' | 'finalizado' | 'pendente' | 'sobrestado';

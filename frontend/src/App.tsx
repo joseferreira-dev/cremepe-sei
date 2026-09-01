@@ -10,6 +10,7 @@ import TagsManager from './components/TagsManager';
 import Admin from './components/Admin';
 import Reports from './components/Reports';
 import SyncPage from './components/SyncPage';
+import Profile from './components/Profile';
 import { DialogProvider } from './components/ui/Dialog';
 import type { User } from './types';
 import { login as apiLogin, loadStoredUser, clearSession, getToken } from './api';
@@ -24,7 +25,8 @@ export type Page =
   | 'tags'
   | 'reports'
   | 'sync'
-  | 'admin';
+  | 'admin'
+  | 'profile';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(() => loadStoredUser());
@@ -85,6 +87,8 @@ export default function App() {
         return <SyncPage navigateTo={navigateTo} />;
       case 'admin':
         return <Admin user={user} />;
+      case 'profile':
+        return <Profile user={user} />;
       default:
         return <Dashboard navigateTo={navigateTo} />;
     }

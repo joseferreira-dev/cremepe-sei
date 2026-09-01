@@ -24,7 +24,7 @@ export default function Admin({ user }: Props) {
   const [logsLoading, setLogsLoading] = useState(true);
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'protocolo', active: true });
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'protocolo', authSource: 'local' as 'local' | 'ad', active: true });
   const [saving, setSaving] = useState(false);
   const [seiConfig, setSeiConfig] = useState({
     siglaSistema: 'IntWeb',
@@ -61,19 +61,23 @@ export default function Admin({ user }: Props) {
 
   const openNewUser = () => {
     setEditingUser(null);
-    setForm({ name: '', email: '', password: '', role: 'protocolo', active: true });
+    setForm({ name: '', email: '', password: '', role: 'protocolo', authSource: 'local', active: true });
     setShowUserModal(true);
   };
 
   const openEditUser = (u: User) => {
     setEditingUser(u);
-    setForm({ name: u.name, email: u.email, password: '', role: u.role, active: u.active });
+    setForm({ name: u.name, email: u.email, password: '', role: u.role, authSource: u.authSource || 'local', active: u.active });
     setShowUserModal(true);
   };
 
   const handleSaveUser = async () => {
     if (!form.name.trim() || !form.email.trim()) {
       dialog.alert('Preencha nome e e-mail.');
+      return;
+    }
+    if (!editingUser && form.authSource === 'local' && !form.password) {
+      dialog.alert('Usuários locais precisam de uma senha.');
       return;
     }
     setSaving(true);
@@ -84,11 +88,7 @@ export default function Admin({ user }: Props) {
         const updated = await updateUser(editingUser.id, payload);
         setUsers(users.map((x) => (x.id === editingUser.id ? updated : x)));
       } else {
-        if (!form.password) {
-          dialog.alert('Informe a senha temporária.');
-          return;
-        }
-        const created = await createUser({ name: form.name, email: form.email, password: form.password, role: form.role, active: form.active });
+        const created = await createUser({ name: form.name, email: form.email, password: form.password || '', role: form.role, authSource: form.authSource });
         setUsers([...users, created]);
       }
       setShowUserModal(false);
@@ -156,15 +156,16 @@ export default function Admin({ user }: Props) {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Nome</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">E-mail</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Perfil</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Autenticação</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {usersLoading ? (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-sm">Carregando usuários…</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400 text-sm">Carregando usuários…</td></tr>
                 ) : users.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-sm">Nenhum usuário cadastrado.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400 text-sm">Nenhum usuário cadastrado.</td></tr>
                 ) : users.map((u) => (
                   <tr key={u.id} className="border-b border-gray-50 hover:bg-gray-50/60">
                     <td className="px-4 py-3">
@@ -182,6 +183,16 @@ export default function Admin({ user }: Props) {
                     <td className="px-4 py-3">
                       <span className="text-xs font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-700">
                         {roleLabels[u.role]}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className="text-xs font-medium px-2 py-0.5 rounded"
+                        style={u.authSource === 'ad'
+                          ? { color: '#1E40AF', background: '#DBEAFE' }
+                          : { color: '#374151', background: '#F3F4F6' }}
+                      >
+                        {u.authSource === 'ad' ? 'AD' : 'Local'}
                       </span>
                     </td>
                     <td className="px-4 py-3">
@@ -351,23 +362,35 @@ export default function Admin({ user }: Props) {
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Nome completo</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Nome completo
+                  {editingUser?.authSource === 'ad' && (
+                    <span className="text-xs text-gray-400 font-normal ml-1">(controlado pelo AD)</span>
+                  )}
+                </label>
                 <input
                   type="text"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   placeholder="Nome completo"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30"
+                  disabled={editingUser?.authSource === 'ad'}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 disabled:bg-gray-50 disabled:text-gray-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">E-mail institucional</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  E-mail institucional
+                  {editingUser?.authSource === 'ad' && (
+                    <span className="text-xs text-gray-400 font-normal ml-1">(controlado pelo AD)</span>
+                  )}
+                </label>
                 <input
                   type="email"
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
                   placeholder="E-mail institucional"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30"
+                  disabled={editingUser?.authSource === 'ad'}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 disabled:bg-gray-50 disabled:text-gray-500"
                 />
               </div>
               <div>
@@ -395,6 +418,19 @@ export default function Admin({ user }: Props) {
                   <option value="admin">Administrador</option>
                 </select>
               </div>
+              {!editingUser && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Fonte de Autenticação</label>
+                  <select
+                    value={form.authSource}
+                    onChange={(e) => setForm({ ...form, authSource: e.target.value as 'local' | 'ad' })}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500/30"
+                  >
+                    <option value="local">Local (senha do sistema)</option>
+                    <option value="ad">Active Directory</option>
+                  </select>
+                </div>
+              )}
               <label className="flex items-center gap-2 text-sm text-gray-700">
                 <input
                   type="checkbox"

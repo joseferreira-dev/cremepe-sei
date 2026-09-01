@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { prisma } from "../db/prisma.js";
 import { authMiddleware, adminOnly } from "../middleware/auth.js";
+import { buscarUnidadesDoUsuario, listarUnidades } from "../services/sei.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -11,7 +12,7 @@ router.use(adminOnly);
 router.get("/users", async (_req: Request, res: Response) => {
   try {
     const users = await prisma.user.findMany({
-      select: { id: true, name: true, email: true, role: true, active: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, authSource: true, active: true, createdAt: true },
       orderBy: { name: "asc" },
     });
     res.json(users);
@@ -22,10 +23,15 @@ router.get("/users", async (_req: Request, res: Response) => {
 
 router.post("/users", async (req: Request, res: Response) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, authSource } = req.body;
 
-    if (!name || !email || !password) {
-      res.status(400).json({ error: "Nome, e-mail e senha são obrigatórios." });
+    if (!name || !email) {
+      res.status(400).json({ error: "Nome e e-mail são obrigatórios." });
+      return;
+    }
+
+    if (authSource !== "ad" && !password) {
+      res.status(400).json({ error: "Senha é obrigatória para usuários locais." });
       return;
     }
 
@@ -35,11 +41,11 @@ router.post("/users", async (req: Request, res: Response) => {
       return;
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = authSource === "ad" ? "" : await bcrypt.hash(password, 12);
 
     const user = await prisma.user.create({
-      data: { name, email, passwordHash, role: role || "analista" },
-      select: { id: true, name: true, email: true, role: true, active: true, createdAt: true },
+      data: { name, email, passwordHash, role: role || "analista", authSource: authSource === "ad" ? "ad" : "local" },
+      select: { id: true, name: true, email: true, role: true, authSource: true, active: true, createdAt: true },
     });
 
     res.status(201).json(user);
@@ -59,8 +65,19 @@ router.put("/users/:id", async (req: Request, res: Response) => {
     }
 
     const updateData: any = {};
-    if (name) updateData.name = name;
-    if (email) updateData.email = email;
+    if (user.authSource === "ad") {
+      if (name && name !== user.name) {
+        res.status(403).json({ error: "Usuários do Active Directory não podem ter o nome alterado via sistema." });
+        return;
+      }
+      if (email && email !== user.email) {
+        res.status(403).json({ error: "Usuários do Active Directory não podem ter o e-mail alterado via sistema." });
+        return;
+      }
+    } else {
+      if (name) updateData.name = name;
+      if (email) updateData.email = email;
+    }
     if (role) updateData.role = role;
     if (typeof active === "boolean") updateData.active = active;
     if (password) updateData.passwordHash = await bcrypt.hash(password, 12);
@@ -68,7 +85,7 @@ router.put("/users/:id", async (req: Request, res: Response) => {
     const updated = await prisma.user.update({
       where: { id: req.params.id },
       data: updateData,
-      select: { id: true, name: true, email: true, role: true, active: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, authSource: true, active: true, createdAt: true },
     });
 
     res.json(updated);
@@ -85,10 +102,42 @@ router.delete("/users/:id", async (req: Request, res: Response) => {
       return;
     }
 
+    await prisma.userUnit.deleteMany({ where: { userId: req.params.id } });
     await prisma.user.delete({ where: { id: req.params.id } });
     res.json({ message: "Usuário excluído com sucesso." });
   } catch (error) {
     res.status(500).json({ error: "Erro ao excluir usuário." });
+  }
+});
+
+router.post("/users/:id/sync-units", async (req: Request, res: Response) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user) {
+      res.status(404).json({ error: "Usuário não encontrado." });
+      return;
+    }
+
+    await prisma.userUnit.deleteMany({ where: { userId: req.params.id } });
+
+    let unidades;
+    if (user.role === "admin") {
+      unidades = await listarUnidades();
+    } else {
+      const sigla = user.email.split("@")[0];
+      unidades = await buscarUnidadesDoUsuario(sigla);
+    }
+
+    for (const u of unidades) {
+      await prisma.userUnit.create({
+        data: { userId: req.params.id, unitId: u.IdUnidade, unitSigla: u.Sigla, unitDesc: u.Descricao },
+      });
+    }
+
+    res.json({ synced: unidades.length });
+  } catch (error: any) {
+    console.error("[ADMIN] Sync units error:", error);
+    res.status(500).json({ error: `Erro ao sincronizar unidades: ${error.message}` });
   }
 });
 

@@ -16,6 +16,7 @@ async function main() {
       email: "admin@cremepe.org.br",
       passwordHash: adminPasswordHash,
       role: "admin",
+      authSource: "local",
     },
   });
   console.log("[SEED] Usuário admin criado: admin@cremepe.org.br / admin123");
@@ -38,6 +39,7 @@ async function main() {
         email: u.email,
         passwordHash: defaultPassword,
         role: u.role,
+        authSource: "local",
       },
     });
   }

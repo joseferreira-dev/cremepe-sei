@@ -11,15 +11,31 @@ model User {
   id           String    @id @default(uuid())
   name         String
   email        String    @unique
-  passwordHash String    @map("password_hash")
+  passwordHash String    @default("") @map("password_hash")
   role         String    @default("analista") // admin, protocolo, analista, gestor
+  authSource   String    @default("local") @map("auth_source") // local ou ad
   active       Boolean   @default(true)
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
   annotations Annotation[]
+  units       UserUnit[]
 
   @@map("users")
+}
+
+model UserUnit {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  unitId    String   @map("unit_id")
+  unitSigla String   @map("unit_sigla")
+  unitDesc  String   @default("") @map("unit_desc")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, unitId])
+  @@map("user_units")
 }
 
 model Process {

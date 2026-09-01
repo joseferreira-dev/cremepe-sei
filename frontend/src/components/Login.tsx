@@ -7,7 +7,7 @@ interface Props {
 }
 
 export default function Login({ onLogin }: Props) {
-  const [email, setEmail] = useState('admin@cremepe.org.br');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [error, setError] = useState('');
@@ -16,7 +16,7 @@ export default function Login({ onLogin }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      setError('Preencha e-mail e senha para continuar.');
+      setError('Preencha o usuário e senha para continuar.');
       return;
     }
     setError('');
@@ -89,19 +89,19 @@ export default function Login({ onLogin }: Props) {
           >
             Bem-vindo de volta
           </h2>
-          <p className="text-gray-500 text-sm mb-8">Entre com suas credenciais institucionais</p>
+          <p className="text-gray-500 text-sm mb-8">Entre com sua senha do Active Directory</p>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">E-mail institucional</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Usuário</label>
               <input
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:border-transparent transition-all"
                 style={{ '--tw-ring-color': '#009C60' } as React.CSSProperties}
-                placeholder="usuario@cremepe.org.br"
-                autoComplete="email"
+                placeholder="Ex: gjose"
+                autoComplete="username"
               />
             </div>
 

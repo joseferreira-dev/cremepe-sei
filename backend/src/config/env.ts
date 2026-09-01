@@ -30,6 +30,10 @@ export const env = {
   JWT_SECRET: process.env.JWT_SECRET || "cremepe-sei-dev-secret",
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "24h",
 
+  LDAP_URL: process.env.LDAP_URL || "",
+  LDAP_BASE_DN: process.env.LDAP_BASE_DN || "",
+  LDAP_DOMAIN: process.env.LDAP_DOMAIN || "",
+
   HOST: process.env.HOST || "127.0.0.1",
   PORT: parseInt(process.env.PORT || "8000", 10),
 

@@ -1,4 +1,4 @@
-import type { Process, User, Tag, Annotation, SyncLog } from './types';
+import type { Process, User, UserUnit, Tag, Annotation, SyncLog } from './types';
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string) || 'http://127.0.0.1:8000/api';
 
@@ -94,6 +94,22 @@ export async function login(
 
 export async function fetchMe(): Promise<User> {
   return request<User>('/auth/me');
+}
+
+export async function fetchProfile(): Promise<User & { units: UserUnit[] }> {
+  return request<User & { units: UserUnit[] }>('/auth/profile');
+}
+
+export async function updateProfile(data: { name: string }): Promise<User> {
+  return request<User>('/auth/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function syncMyUnits(): Promise<{ synced: number }> {
+  return request<{ synced: number }>('/auth/sync-units', { method: 'POST' });
 }
 
 // ---- Mapping backend Process to frontend Process ----
@@ -339,6 +355,7 @@ export async function createUser(data: {
   email: string;
   password: string;
   role: string;
+  authSource?: string;
 }): Promise<User> {
   return request<User>('/admin/users', {
     method: 'POST',
@@ -360,6 +377,10 @@ export async function updateUser(
 
 export async function deleteUser(id: string): Promise<void> {
   await request(`/admin/users/${id}`, { method: 'DELETE' });
+}
+
+export async function syncUserUnits(id: string): Promise<{ synced: number }> {
+  return request<{ synced: number }>(`/admin/users/${id}/sync-units`, { method: 'POST' });
 }
 
 export async function listLogs(): Promise<SyncLog[]> {

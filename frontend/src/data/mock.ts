@@ -11,11 +11,11 @@ export const mockTags: Tag[] = [
 ];
 
 export const mockUsers: User[] = [
-  { id: 'u1', name: 'Ana Paula Ferreira', email: 'ana.ferreira@cremepe.org.br', role: 'admin', active: true, createdAt: '2024-01-10' },
-  { id: 'u2', name: 'Carlos Eduardo Silva', email: 'carlos.silva@cremepe.org.br', role: 'protocolo', active: true, createdAt: '2024-02-14' },
-  { id: 'u3', name: 'Mariana Costa', email: 'mariana.costa@cremepe.org.br', role: 'analista', active: true, createdAt: '2024-03-01' },
-  { id: 'u4', name: 'Roberto Alves', email: 'roberto.alves@cremepe.org.br', role: 'gestor', active: true, createdAt: '2024-01-20' },
-  { id: 'u5', name: 'Juliana Mendes', email: 'juliana.mendes@cremepe.org.br', role: 'analista', active: false, createdAt: '2023-11-05' },
+  { id: 'u1', name: 'Ana Paula Ferreira', email: 'ana.ferreira@cremepe.org.br', role: 'admin', authSource: 'local', active: true, createdAt: '2024-01-10' },
+  { id: 'u2', name: 'Carlos Eduardo Silva', email: 'carlos.silva@cremepe.org.br', role: 'protocolo', authSource: 'local', active: true, createdAt: '2024-02-14' },
+  { id: 'u3', name: 'Mariana Costa', email: 'mariana.costa@cremepe.org.br', role: 'analista', authSource: 'local', active: true, createdAt: '2024-03-01' },
+  { id: 'u4', name: 'Roberto Alves', email: 'roberto.alves@cremepe.org.br', role: 'gestor', authSource: 'local', active: true, createdAt: '2024-01-20' },
+  { id: 'u5', name: 'Juliana Mendes', email: 'juliana.mendes@cremepe.org.br', role: 'analista', authSource: 'local', active: false, createdAt: '2023-11-05' },
 ];
 
 export const mockProcesses: Process[] = [

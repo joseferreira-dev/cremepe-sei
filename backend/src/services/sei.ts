@@ -198,6 +198,103 @@ export async function listarUnidades(force = false): Promise<Unidade[]> {
   return unidadesCache;
 }
 
+export interface UsuarioSei {
+  IdUsuario: string;
+  Sigla: string;
+  Nome: string;
+}
+
+function buildListarUsuariosEnvelope(idUnidade: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:sei="Sei">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <sei:listarUsuarios soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+      <SiglaSistema>${env.SEI_SIGLA_SISTEMA}</SiglaSistema>
+      <IdentificacaoServico>${env.SEI_IDENTIFICACAO_SERVICO}</IdentificacaoServico>
+      <IdUnidade>${idUnidade}</IdUnidade>
+    </sei:listarUsuarios>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+}
+
+function parseUsuarios(xml: string): UsuarioSei[] {
+  const usuarios: UsuarioSei[] = [];
+  const returnMatch = xml.match(/<(?:\w[\w.-]*:)?return\s*>([\s\S]*?)<\/(?:\w[\w.-]*:)?return\s*>/);
+  const body = returnMatch ? returnMatch[1] : xml;
+
+  const itemRe = new RegExp(`<${NS_RE}item\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}item>`, "g");
+  let im;
+  while ((im = itemRe.exec(body)) !== null) {
+    const inner = im[1];
+    const get = (t: string) => {
+      const m = inner.match(new RegExp(`<${NS_RE}${t}\\b[^>]*>([^<]*)<\\/${NS_RE}${t}>`));
+      return m ? m[1].trim() : "";
+    };
+    const sigla = get("Sigla");
+    if (sigla) {
+      usuarios.push({
+        IdUsuario: get("IdUsuario"),
+        Sigla: sigla,
+        Nome: get("Nome"),
+      });
+    }
+  }
+
+  if (usuarios.length === 0 && body.includes("<Sigla>")) {
+    const userRe = new RegExp(`<${NS_RE}Usuario\\b[^>]*>([\\s\\S]*?)<\\/${NS_RE}Usuario>`, "g");
+    let um: RegExpExecArray | null;
+    while ((um = userRe.exec(body)) !== null) {
+      const inner = um[1];
+      const get = (t: string) => {
+        const m = inner.match(new RegExp(`<${NS_RE}${t}\\b[^>]*>([^<]*)<\\/${NS_RE}${t}>`));
+        return m ? m[1].trim() : "";
+      };
+      const sigla = get("Sigla");
+      if (sigla) {
+        usuarios.push({ IdUsuario: get("IdUsuario"), Sigla: sigla, Nome: get("Nome") });
+      }
+    }
+  }
+
+  return usuarios;
+}
+
+export async function listarUsuariosPorUnidade(idUnidade: string): Promise<UsuarioSei[]> {
+  const xml = await fetchSoap(buildListarUsuariosEnvelope(idUnidade), "Sei#listarUsuarios");
+
+  if (xml.includes("<faultstring>")) {
+    const m = xml.match(/<faultstring>([\s\S]*?)<\/faultstring>/);
+    throw new Error(`Erro SEI ao listar usuários: ${m ? m[1].trim() : "erro desconhecido"}`);
+  }
+
+  return parseUsuarios(xml);
+}
+
+export async function buscarUnidadesDoUsuario(siglaUsuario: string): Promise<Unidade[]> {
+  const unidades = await listarUnidades();
+  const unidadesDoUsuario: Unidade[] = [];
+
+  for (const unidade of unidades) {
+    try {
+      const usuarios = await listarUsuariosPorUnidade(unidade.IdUnidade);
+      const encontrado = usuarios.some(
+        (u) => u.Sigla.toUpperCase() === siglaUsuario.toUpperCase()
+      );
+      if (encontrado) {
+        unidadesDoUsuario.push(unidade);
+      }
+    } catch {
+      // Unidade sem acesso, ignora
+    }
+  }
+
+  return unidadesDoUsuario;
+}
+
 /** Extract a single leaf text element from a string, namespace-agnostic */
 function getTag(xml: string, tag: string): string {
   const re = new RegExp(
