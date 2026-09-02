@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Page } from '../App';
-import { listProcesses, syncProcess } from '../api';
+import { listProcesses, syncProcess, listUnidades, type SeiUnidade } from '../api';
 import type { Process } from '../types';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
@@ -40,13 +40,45 @@ export default function SyncPage({ navigateTo }: Props) {
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const perPage = 20;
 
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('em_andamento');
+  const [unitFilter, setUnitFilter] = useState<string>('all');
+  const [tipoFilter, setTipoFilter] = useState<string>('all');
+  const [nivelFilter, setNivelFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [units, setUnits] = useState<SeiUnidade[]>([]);
+  const [tipos, setTipos] = useState<string[]>([]);
+
+  useEffect(() => {
+    listUnidades().then(setUnits).catch(() => setUnits([]));
+    listProcesses({ limit: 500 }).then((res) => {
+      const unique = [...new Set(res.processes.map((p) => p.tipo).filter(Boolean))].sort();
+      setTipos(unique);
+    }).catch(() => {});
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const filterParams = {
+        page,
+        limit: perPage,
+        search,
+        status: statusFilter,
+        unit: unitFilter,
+        tipo: tipoFilter,
+        nivelAcesso: nivelFilter,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+      };
+      const andamentoParams = { ...filterParams, page: 1, limit: 1, status: 'em_andamento' };
+      const concluidosParams = { ...filterParams, page: 1, limit: 1, status: 'finalizado' };
+
       const [res, resAndamento, resConcluidos] = await Promise.all([
-        listProcesses({ page, limit: perPage }),
-        listProcesses({ page: 1, limit: 1, status: 'em_andamento' }),
-        listProcesses({ page: 1, limit: 1, status: 'finalizado' }),
+        listProcesses(filterParams),
+        listProcesses(andamentoParams),
+        listProcesses(concluidosParams),
       ]);
       setProcesses(res.processes);
       setTotal(res.total);
@@ -58,29 +90,39 @@ export default function SyncPage({ navigateTo }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, search, statusFilter, unitFilter, tipoFilter, nivelFilter, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleSyncAll = async () => {
     if (syncingAll) return;
-    if (totalAndamento === 0) {
-      dialog.alert('Nenhum processo para sincronizar.');
+    if (total === 0) {
+      dialog.alert('Nenhum processo para sincronizar com os filtros aplicados.');
       return;
     }
     setSyncingAll(true);
-    setSyncProgress({ done: 0, total: totalAndamento });
+    setSyncProgress({ done: 0, total });
     let erros = 0;
     let synced = 0;
     try {
       let pageToFetch = 1;
       let hasMore = true;
       while (hasMore) {
-        const allRes = await listProcesses({ page: pageToFetch, limit: 500, status: 'em_andamento' });
+        const allRes = await listProcesses({
+          page: pageToFetch,
+          limit: 500,
+          status: statusFilter,
+          search,
+          unit: unitFilter,
+          tipo: tipoFilter,
+          nivelAcesso: nivelFilter,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
+        });
         const sindicaveis = allRes.processes;
         for (let i = 0; i < sindicaveis.length; i++) {
           synced++;
-          setSyncProgress({ done: synced, total: totalAndamento });
+          setSyncProgress({ done: synced, total });
           try {
             await syncProcess(sindicaveis[i].id);
           } catch {
@@ -93,7 +135,7 @@ export default function SyncPage({ navigateTo }: Props) {
       if (erros > 0) {
         dialog.success(`Sincronização concluída. ${erros} processo(s) falharam.`);
       } else {
-        dialog.success('Todos os processos foram sincronizados com sucesso.');
+        dialog.success('Todos os processos filtrados foram sincronizados com sucesso.');
       }
       load();
     } catch (e: any) {
@@ -116,6 +158,8 @@ export default function SyncPage({ navigateTo }: Props) {
     }
   };
 
+  const hasFilters = search || statusFilter !== 'all' || unitFilter !== 'all' || tipoFilter !== 'all' || nivelFilter !== 'all' || dateFrom || dateTo;
+
   return (
     <div className="p-8 space-y-6" style={{ fontFamily: "'Inter', sans-serif" }}>
       <div className="flex items-center justify-between">
@@ -129,7 +173,7 @@ export default function SyncPage({ navigateTo }: Props) {
         </div>
         <button
           onClick={handleSyncAll}
-          disabled={syncingAll || totalAndamento === 0}
+          disabled={syncingAll || total === 0}
           className="flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
           style={{ background: '#009C60' }}
         >
@@ -145,8 +189,90 @@ export default function SyncPage({ navigateTo }: Props) {
           )}
           {syncingAll
             ? `Sincronizando ${syncProgress?.done || 0}/${syncProgress?.total || 0}…`
-            : `Sincronizar em Andamento (${totalAndamento})`}
+            : `Sincronizar (${total})`}
         </button>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
+        {/* Line 1: Search, Units, Types */}
+        <div className="flex flex-wrap gap-3 items-center">
+          <div className="relative flex-1 min-w-[200px]">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Buscar por número, especificação ou interessado…"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30"
+            />
+          </div>
+          <select
+            value={unitFilter}
+            onChange={(e) => { setUnitFilter(e.target.value); setPage(1); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
+          >
+            <option value="all">Todas as unidades</option>
+            {units.map((u) => <option key={u.id} value={u.sigla}>{u.sigla}</option>)}
+          </select>
+          <select
+            value={tipoFilter}
+            onChange={(e) => { setTipoFilter(e.target.value); setPage(1); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
+          >
+            <option value="all">Todos os tipos</option>
+            {tipos.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        {/* Line 2: Status, Level, Dates, Clear */}
+        <div className="flex flex-wrap gap-3 items-center pt-2 border-t border-gray-100">
+          <select
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
+          >
+            <option value="all">Todos os status</option>
+            <option value="em_andamento">Em Andamento</option>
+            <option value="finalizado">Finalizado</option>
+          </select>
+          <select
+            value={nivelFilter}
+            onChange={(e) => { setNivelFilter(e.target.value); setPage(1); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
+          >
+            <option value="all">Todos os níveis</option>
+            <option value="Público">Público</option>
+            <option value="Restrito">Restrito</option>
+          </select>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">De:</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">Até:</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30"
+            />
+          </div>
+          {hasFilters && (
+            <button
+              onClick={() => { setSearch(''); setStatusFilter('all'); setUnitFilter('all'); setTipoFilter('all'); setNivelFilter('all'); setDateFrom(''); setDateTo(''); setPage(1); }}
+              className="text-sm text-gray-500 hover:text-red-500 transition-colors"
+            >
+              Limpar filtros
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Barra de progresso */}
@@ -191,7 +317,7 @@ export default function SyncPage({ navigateTo }: Props) {
               ) : processes.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-12 text-center text-gray-400 text-sm">
-                    Nenhum processo cadastrado.
+                    Nenhum processo encontrado com os filtros aplicados.
                   </td>
                 </tr>
               ) : processes.map((p) => {

@@ -125,11 +125,19 @@ router.get("/", async (req: Request, res: Response) => {
       where.nivelAcesso = nivelAcesso;
     }
 
-    if (dateFrom) {
-      where.dataAutuacao = { ...where.dataAutuacao, gte: dateFrom };
-    }
-    if (dateTo) {
-      where.dataAutuacao = { ...where.dataAutuacao, lte: dateTo };
+    if (dateFrom || dateTo) {
+      const processes_all = await prisma.process.findMany({
+        where: { ...where },
+        select: { id: true, dataAutuacao: true },
+      });
+      const ids = processes_all.filter((p) => {
+        if (!p.dataAutuacao) return false;
+        const d = p.dataAutuacao.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1');
+        if (dateFrom && d < dateFrom) return false;
+        if (dateTo && d > dateTo) return false;
+        return true;
+      }).map((p) => p.id);
+      where.id = ids.length > 0 ? { in: ids } : "__NO_MATCH__";
     }
 
     if (userRole !== "admin") {
@@ -492,11 +500,23 @@ router.post("/import", async (req: Request, res: Response) => {
           continue;
         }
 
-        const unidadesBatch = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
+        let unidadesBatch = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
           id: u.Unidade.IdUnidade,
           sigla: u.Unidade.Sigla,
           descricao: u.Unidade.Descricao,
         }));
+
+        // Fallback: quando UnidadesProcedimentoAberto retorna vazio
+        if (unidadesBatch.length === 0) {
+          if (seiData.UnidadeAtual) {
+            unidadesBatch = [{ id: seiData.UnidadeAtual.IdUnidade, sigla: seiData.UnidadeAtual.Sigla, descricao: seiData.UnidadeAtual.Descricao }];
+          } else {
+            try {
+              const todasUnidades = await listarUnidades();
+              unidadesBatch = todasUnidades.map((u) => ({ id: u.IdUnidade, sigla: u.Sigla, descricao: u.Descricao }));
+            } catch { /* ignore */ }
+          }
+        }
 
         if (userRole !== "admin") {
           const hasAccess = unidadesBatch.some((u: any) => userUnitSiglas.includes(u.sigla));
@@ -618,18 +638,41 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
       return;
     }
 
-    const unidadesSync = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
+    let unidadesParaBuscar = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
       id: u.Unidade.IdUnidade,
       sigla: u.Unidade.Sigla,
       descricao: u.Unidade.Descricao,
     }));
 
+    // Unidades reais = apenas as abertas no SEI (para salvar no banco)
+    const unidadesReais = [...unidadesParaBuscar];
+
+    // Fallback para buscar andamentos quando UnidadesProcedimentoAberto retorna vazio:
+    // 1. unidades salvas no banco
+    // 2. UnidadeAtual do SEI
+    // 3. Todas as unidades CREMEPE
+    if (unidadesParaBuscar.length === 0) {
+      const unidadesBanco = JSON.parse(process.unidades || "[]");
+      if (unidadesBanco.length > 0) {
+        unidadesParaBuscar = unidadesBanco;
+      } else if (seiData.UnidadeAtual) {
+        unidadesParaBuscar = [{ id: seiData.UnidadeAtual.IdUnidade, sigla: seiData.UnidadeAtual.Sigla, descricao: seiData.UnidadeAtual.Descricao }];
+      } else {
+        try {
+          const todasUnidades = await listarUnidades();
+          unidadesParaBuscar = todasUnidades.map((u) => ({ id: u.IdUnidade, sigla: u.Sigla, descricao: u.Descricao }));
+        } catch { /* ignore */ }
+      }
+    }
+
     let andamentosSync: any[] = [];
-    if (unidadesSync.length > 0) {
+    if (unidadesParaBuscar.length > 0) {
       try {
-        const seiUnidadesSync = unidadesSync.map((u) => ({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao }));
+        const seiUnidadesSync = unidadesParaBuscar.map((u) => ({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao }));
         andamentosSync = await listarAndamentos(process.numeroSei, seiUnidadesSync);
-      } catch { /* falha não impede sincronização */ }
+      } catch (err: any) {
+        console.warn(`[SYNC] ${process.numeroSei}: falha ao listar andamentos: ${err.message}`);
+      }
     }
 
     const documentosExistentes: DocumentoFromAndamento[] = JSON.parse(process.documentos || "[]");
@@ -673,7 +716,7 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
     }
 
     const concluido = isProcessoConcluido(
-      unidadesSync,
+      unidadesReais,
       ultimoAndSync || (seiData.UltimoAndamento ? { descricao: seiData.UltimoAndamento.Descricao } : null),
       (seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
       (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
@@ -695,7 +738,7 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
           sigla: seiData.UnidadeAtual.Sigla,
           descricao: seiData.UnidadeAtual.Descricao,
         }) : process.unidadeAtual,
-        unidades: JSON.stringify(unidadesSync),
+        unidades: JSON.stringify(unidadesReais),
         andamentos: JSON.stringify(andamentosSync.map((a) => ({
           id: a.IdAndamento,
           descricao: a.Descricao,

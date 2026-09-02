@@ -38,7 +38,6 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState<SeiUnidade[]>([]);
   const [tipos, setTipos] = useState<string[]>([]);
-  const [showFilters, setShowFilters] = useState(false);
   const perPage = 10;
 
   useEffect(() => {
@@ -148,6 +147,7 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
 
       {/* Filters */}
       <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
+        {/* Line 1: Search, Units, Types */}
         <div className="flex flex-wrap gap-3 items-center">
           <div className="relative flex-1 min-w-[200px]">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -162,6 +162,25 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
             />
           </div>
           <select
+            value={unitFilter}
+            onChange={(e) => { setUnitFilter(e.target.value); setPage(1); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
+          >
+            <option value="all">Todas as unidades</option>
+            {units.map((u) => <option key={u.id} value={u.sigla}>{u.sigla}</option>)}
+          </select>
+          <select
+            value={tipoFilter}
+            onChange={(e) => { setTipoFilter(e.target.value); setPage(1); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
+          >
+            <option value="all">Todos os tipos</option>
+            {tipos.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        {/* Line 2: Status, Level, Dates, Clear */}
+        <div className="flex flex-wrap gap-3 items-center pt-2 border-t border-gray-100">
+          <select
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
@@ -171,22 +190,32 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
             <option value="finalizado">Finalizado</option>
           </select>
           <select
-            value={unitFilter}
-            onChange={(e) => { setUnitFilter(e.target.value); setPage(1); }}
+            value={nivelFilter}
+            onChange={(e) => { setNivelFilter(e.target.value); setPage(1); }}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
           >
-            <option value="all">Todas as unidades</option>
-            {units.map((u) => <option key={u.id} value={u.sigla}>{u.sigla}</option>)}
+            <option value="all">Todos os níveis</option>
+            <option value="Público">Público</option>
+            <option value="Restrito">Restrito</option>
           </select>
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-            </svg>
-            {showFilters ? 'Ocultar filtros' : 'Mais filtros'}
-          </button>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">De:</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">Até:</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30"
+            />
+          </div>
           {(search || statusFilter !== 'all' || unitFilter !== 'all' || tipoFilter !== 'all' || nivelFilter !== 'all' || dateFrom || dateTo) && (
             <button
               onClick={() => { setSearch(''); setStatusFilter('all'); setUnitFilter('all'); setTipoFilter('all'); setNivelFilter('all'); setDateFrom(''); setDateTo(''); setPage(1); }}
@@ -196,46 +225,6 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
             </button>
           )}
         </div>
-
-        {showFilters && (
-          <div className="flex flex-wrap gap-3 items-center pt-2 border-t border-gray-100">
-            <select
-              value={tipoFilter}
-              onChange={(e) => { setTipoFilter(e.target.value); setPage(1); }}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
-            >
-              <option value="all">Todos os tipos</option>
-              {tipos.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <select
-              value={nivelFilter}
-              onChange={(e) => { setNivelFilter(e.target.value); setPage(1); }}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
-            >
-              <option value="all">Todos os níveis</option>
-              <option value="Público">Público</option>
-              <option value="Restrito">Restrito</option>
-            </select>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500">De:</label>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500">Até:</label>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30"
-              />
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Batch actions */}
