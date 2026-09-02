@@ -239,6 +239,13 @@ export async function syncProcess(id: string): Promise<Process> {
   return mapProcess(data);
 }
 
+export async function syncBatch(ids: string[]): Promise<{ results: { id: string; status: string; mensagem: string }[]; total: number }> {
+  return request(`/processes/sync-batch`, {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
+}
+
 export async function updateProcess(
   id: string,
   body: { statusSistema?: string; tagIds?: string[] }
@@ -347,6 +354,18 @@ export interface DocumentoFromAndamento {
   idDocumento: string;
   tipo: string;
   descricao: string;
+}
+
+export interface ProcessoPai {
+  id: string;
+  numero: string;
+  tipo: string | null;
+  statusSistema: string;
+}
+
+export async function listProcessosPai(processId: string): Promise<ProcessoPai[]> {
+  const data = await request<{ pais: ProcessoPai[] }>(`/processes/${processId}/pais`);
+  return data.pais || [];
 }
 
 export async function listDocumentos(processId: string): Promise<DocumentoFromAndamento[]> {

@@ -197,6 +197,50 @@ let unidadesCacheAt = 0;
 const UNIDADES_TTL = 5 * 60 * 1000;
 
 /**
+ * Monta a lista de unidades para busca de andamentos/documentos.
+ * Prioridade: unidadeSincronizacao > abertas > todas.
+ */
+export function montarUnidadesParaBusca(
+  unidadeSincronizacao: string | null | undefined,
+  unidadesAbertas: { id: string; sigla: string; descricao: string }[],
+  todasUnidades: Unidade[],
+): { IdUnidade: string; Sigla: string; Descricao: string }[] {
+  const resultado: { IdUnidade: string; Sigla: string; Descricao: string }[] = [];
+  const vistos = new Set<string>();
+
+  const adicionar = (u: { IdUnidade: string; Sigla: string; Descricao: string }) => {
+    if (!vistos.has(u.IdUnidade)) {
+      vistos.add(u.IdUnidade);
+      resultado.push(u);
+    }
+  };
+
+  // 1. Unidade que funcionou na última sincronização
+  if (unidadeSincronizacao) {
+    try {
+      const anteriores: { id: string }[] = JSON.parse(unidadeSincronizacao);
+      for (const u of anteriores) {
+        adicionar({ IdUnidade: u.id, Sigla: "CREMEPE", Descricao: "" });
+      }
+    } catch {
+      adicionar({ IdUnidade: unidadeSincronizacao, Sigla: "CREMEPE", Descricao: "" });
+    }
+  }
+
+  // 2. Unidades abertas no SEI
+  for (const u of unidadesAbertas) {
+    adicionar({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao });
+  }
+
+  // 3. Todas as unidades CREMEPE
+  for (const u of todasUnidades) {
+    adicionar({ IdUnidade: u.IdUnidade, Sigla: u.Sigla, Descricao: u.Descricao });
+  }
+
+  return resultado;
+}
+
+/**
  * Lista as unidades acessíveis ao serviço e retorna apenas aquelas cuja sigla
  * começa com "CREMEPE". O resultado é cacheado por alguns minutos para evitar
  * chamadas excessivas ao WebService.

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../App';
 import type { User, Process, ProcessStatus, Annotation } from '../types';
-import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, saveSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listDocumentos, getDocumentoLink, type DocumentoFromAndamento } from '../api';
+import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, saveSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listDocumentos, getDocumentoLink, listProcessosPai, type DocumentoFromAndamento, type ProcessoPai } from '../api';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
 
@@ -44,10 +44,14 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
   const [statusSaving, setStatusSaving] = useState(false);
   const [documentos, setDocumentos] = useState<DocumentoFromAndamento[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [processosPai, setProcessosPai] = useState<ProcessoPai[]>([]);
+  const [paisLoading, setPaisLoading] = useState(false);
 
   useEffect(() => {
     if (!processId) { setNotFound(true); return; }
     setNotFound(false);
+    setProcessosPai([]);
+    setDocumentos([]);
     getProcess(processId)
       .then((p) => {
         setProcess(p);
@@ -65,6 +69,13 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
         .then(setDocumentos)
         .catch(() => {})
         .finally(() => setDocsLoading(false));
+    }
+    if (tab === 'relacionados' && processId && processosPai.length === 0 && !paisLoading) {
+      setPaisLoading(true);
+      listProcessosPai(processId)
+        .then(setProcessosPai)
+        .catch(() => {})
+        .finally(() => setPaisLoading(false));
     }
   }, [tab, processId]);
 
@@ -805,37 +816,40 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
                   Processos que incluem este
                 </h3>
                 <p className="text-xs text-gray-500 mb-3">Processos nos quais este processo está anexado:</p>
-                {(() => {
-                  const anexadosIds = new Set(process.procedimentosAnexados.map((p) => p.id));
-                  const pais = process.procedimentosRelacionados.filter((p) => !anexadosIds.has(p.id));
-                  return pais.length === 0 ? (
-                    <p className="text-sm text-gray-400 italic">Não está anexado em nenhum outro processo.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {pais.map((p) => (
-                        <button
-                          key={p.id}
-                          onClick={() => handleClickRelated(p.numero)}
-                          className="w-full flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-amber-300 hover:bg-amber-50/50 transition-colors text-left group"
-                        >
-                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform" style={{ background: '#FEF3C7' }}>
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#92400E" strokeWidth={1.8}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                            </svg>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-mono font-semibold text-gray-800 group-hover:text-amber-700 transition-colors">{p.numero}</p>
-                            {p.tipo && <p className="text-xs text-gray-500 truncate">{p.tipo}</p>}
-                          </div>
+                {paisLoading ? (
+                  <p className="text-sm text-gray-400 italic">Buscando processos pai...</p>
+                ) : processosPai.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">Não está anexado em nenhum outro processo.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {processosPai.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleClickRelated(p.numero)}
+                        className="w-full flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-amber-300 hover:bg-amber-50/50 transition-colors text-left group"
+                      >
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform" style={{ background: '#FEF3C7' }}>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#92400E" strokeWidth={1.8}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-mono font-semibold text-gray-800 group-hover:text-amber-700 transition-colors">{p.numero}</p>
+                          {p.tipo && <p className="text-xs text-gray-500 truncate">{p.tipo}</p>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {p.statusSistema === 'finalizado' && (
+                            <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-medium">Finalizado</span>
+                          )}
                           <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">Processo pai</span>
-                        </button>
-                      ))}
-                    </div>
-                  );
-                })()}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {process.procedimentosRelacionados.length === 0 && process.procedimentosAnexados.length === 0 && (
+              {process.procedimentosRelacionados.length === 0 && process.procedimentosAnexados.length === 0 && processosPai.length === 0 && (
                 <div className="text-center py-8 text-gray-400">
                   <p className="text-sm">Nenhum processo relacionado encontrado.</p>
                   <p className="text-xs mt-1">Faça uma sincronização para buscar os dados no SEI.</p>

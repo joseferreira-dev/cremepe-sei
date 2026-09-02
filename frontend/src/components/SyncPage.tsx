@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Page } from '../App';
-import { listProcesses, syncProcess, listUnidades, type SeiUnidade } from '../api';
+import { listProcesses, syncBatch, syncProcess, listUnidades, type SeiUnidade } from '../api';
 import type { Process } from '../types';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
@@ -120,14 +120,13 @@ export default function SyncPage({ navigateTo }: Props) {
           dateTo: dateTo || undefined,
         });
         const sindicaveis = allRes.processes;
-        for (let i = 0; i < sindicaveis.length; i++) {
-          synced++;
+        const ids = sindicaveis.map((p) => p.id);
+        if (ids.length > 0) {
+          const result = await syncBatch(ids);
+          const falhas = result.results.filter((r) => r.status === "error");
+          erros += falhas.length;
+          synced += result.results.length;
           setSyncProgress({ done: synced, total });
-          try {
-            await syncProcess(sindicaveis[i].id);
-          } catch {
-            erros++;
-          }
         }
         hasMore = sindicaveis.length === 500;
         pageToFetch++;
