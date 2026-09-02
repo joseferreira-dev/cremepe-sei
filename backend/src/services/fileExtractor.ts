@@ -16,8 +16,9 @@ export async function extrairTexto(filePath: string, originalName?: string): Pro
     case ".pdf":
       return extrairPdf(filePath);
     case ".docx":
-    case ".doc":
       return extrairDocx(filePath);
+    case ".doc":
+      return extrairDoc(filePath);
     case ".txt":
     case ".csv":
       return readFileSync(filePath, "utf-8");
@@ -51,6 +52,38 @@ async function extrairDocx(filePath: string): Promise<string> {
   const buffer = readFileSync(filePath);
   const result = await mammoth.extractRawText({ buffer });
   return result.value || "";
+}
+
+async function extrairDoc(filePath: string): Promise<string> {
+  try {
+    const mammoth = await import("mammoth");
+    const buffer = readFileSync(filePath);
+    const result = await mammoth.extractRawText({ buffer });
+    if (result.value && result.value.trim()) {
+      return result.value;
+    }
+  } catch {
+    // mammoth não suporta .doc, tentar outra abordagem
+  }
+
+  try {
+    const XLSX = await import("xlsx");
+    const buffer = readFileSync(filePath);
+    const workbook = XLSX.read(buffer, { type: "buffer" });
+    let texto = "";
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      const dados = XLSX.utils.sheet_to_csv(sheet);
+      if (dados.trim()) {
+        texto += `\n--- Planilha: ${sheetName} ---\n${dados}\n`;
+      }
+    }
+    if (texto.trim()) return texto;
+  } catch {
+    // não é um arquivo Excel
+  }
+
+  return "[Arquivo .doc — formato legado. Converta para .docx antes de enviar]";
 }
 
 async function extrairExcel(filePath: string): Promise<string> {

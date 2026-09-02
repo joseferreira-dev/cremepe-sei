@@ -183,6 +183,10 @@ export async function listProcesses(params: {
   status?: string;
   unit?: string;
   resumo?: string;
+  tipo?: string;
+  nivelAcesso?: string;
+  dateFrom?: string;
+  dateTo?: string;
 } = {}): Promise<{ processes: Process[]; total: number; totalPages: number }> {
   const qs = new URLSearchParams();
   if (params.page) qs.set('page', String(params.page));
@@ -191,6 +195,10 @@ export async function listProcesses(params: {
   if (params.status && params.status !== 'all') qs.set('status', params.status);
   if (params.unit && params.unit !== 'all') qs.set('unit', params.unit);
   if (params.resumo && params.resumo !== 'all') qs.set('resumo', params.resumo);
+  if (params.tipo && params.tipo !== 'all') qs.set('tipo', params.tipo);
+  if (params.nivelAcesso && params.nivelAcesso !== 'all') qs.set('nivelAcesso', params.nivelAcesso);
+  if (params.dateFrom) qs.set('dateFrom', params.dateFrom);
+  if (params.dateTo) qs.set('dateTo', params.dateTo);
 
   const data = await request<{
     processes: BackendProcess[];
@@ -269,6 +277,17 @@ export async function generateSummary(
   files.forEach((f) => form.append('files', f));
   if (textoManual) form.append('textoManual', textoManual);
   return request(`/processes/${id}/resumo`, { method: 'POST', body: form });
+}
+
+export async function saveSummary(
+  id: string,
+  resumo: string
+): Promise<{ process: Process }> {
+  return request(`/processes/${id}/resumo/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resumo }),
+  });
 }
 
 export async function generateSummaryFromDocs(id: string): Promise<{ resumo: string }> {

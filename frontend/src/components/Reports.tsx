@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useEffect, useState, useCallback } from 'react';
 import type { Process } from '../types';
 import { listProcesses } from '../api';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -19,12 +19,28 @@ const STATUS_DOT_COLORS: Record<string, string> = {
 
 export default function Reports() {
   const [processes, setProcesses] = useState<Process[]>([]);
+  const [emAndamentoProcesses, setEmAndamentoProcesses] = useState<Process[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
 
-  useEffect(() => {
-    listProcesses({ limit: 200 }).then((res) => setProcesses(res.processes)).catch(() => {});
+  const loadData = useCallback(() => {
+    Promise.all([
+      listProcesses({ limit: 500 }),
+      listProcesses({ limit: 500, status: 'em_andamento' }),
+    ]).then(([all, emAndamento]) => {
+      setProcesses(all.processes);
+      setEmAndamentoProcesses(emAndamento.processes);
+      setTotalCount(all.total);
+    }).catch(() => {});
   }, []);
 
-  // Por status
+  useEffect(() => {
+    loadData();
+    const onVisibility = () => { if (document.visibilityState === 'visible') loadData(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [loadData]);
+
+  // Por status (todos)
   const byStatus = Object.entries(
     processes.reduce<Record<string, number>>((acc, p) => {
       acc[p.status] = (acc[p.status] || 0) + 1;
@@ -37,14 +53,12 @@ export default function Reports() {
     color: STATUS_DOT_COLORS[key] ?? '#6B7280',
   }));
 
-  // Por unidade (usa array unidades)
-  const unitCount = processes.reduce<Record<string, number>>((acc, p) => {
+  // Por unidade (somente em andamento, sem "Sem unidade")
+  const unitCount = emAndamentoProcesses.reduce<Record<string, number>>((acc, p) => {
     if (p.unidades.length > 0) {
       for (const u of p.unidades) {
         acc[u.sigla] = (acc[u.sigla] || 0) + 1;
       }
-    } else {
-      acc['Sem unidade'] = (acc['Sem unidade'] || 0) + 1;
     }
     return acc;
   }, {});
@@ -53,8 +67,8 @@ export default function Reports() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 12);
 
-  // Por tipo
-  const typeCount = processes.reduce<Record<string, number>>((acc, p) => {
+  // Por tipo (somente em andamento)
+  const typeCount = emAndamentoProcesses.reduce<Record<string, number>>((acc, p) => {
     const tipo = p.tipo || 'Sem tipo';
     acc[tipo] = (acc[tipo] || 0) + 1;
     return acc;
@@ -71,7 +85,7 @@ export default function Reports() {
   }, {});
 
   const withResume = processes.filter((p) => p.resumoIa).length;
-  const total = processes.length;
+  const total = totalCount || processes.length;
 
   return (
     <div className="p-8 space-y-8" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -86,8 +100,8 @@ export default function Reports() {
           { label: 'Total', value: total, color: '#009C60' },
           { label: 'Em Andamento', value: processes.filter((p) => p.status === 'em_andamento').length, color: '#29ABE2' },
           { label: 'Finalizados', value: processes.filter((p) => p.status === 'finalizado').length, color: '#8DC63F' },
-          { label: 'Com Resumo IA', value: withResume, color: '#6366F1' },
-          { label: 'Sem Resumo IA', value: total - withResume, color: '#F59E0B' },
+          { label: 'Com Resumo', value: withResume, color: '#6366F1' },
+          { label: 'Sem Resumo', value: total - withResume, color: '#F59E0B' },
         ].map((k) => (
           <div key={k.label} className="bg-white rounded-xl border border-gray-100 p-4">
             <p className="text-xs text-gray-400 uppercase font-medium tracking-wide">{k.label}</p>
@@ -98,9 +112,10 @@ export default function Reports() {
 
       {/* Tipo + Unidade lado a lado */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Por tipo */}
+        {/* Por tipo (somente em andamento) */}
         <div className="bg-white rounded-xl border border-gray-100 p-6">
-          <h2 className="text-sm font-semibold text-gray-800 mb-5" style={{ fontFamily: "'Outfit', sans-serif" }}>Processos por Tipo</h2>
+          <h2 className="text-sm font-semibold text-gray-800 mb-1" style={{ fontFamily: "'Outfit', sans-serif" }}>Processos por Tipo</h2>
+          <p className="text-xs text-gray-400 mb-5">Apenas processos em andamento</p>
           {byType.length > 0 ? (
             <ResponsiveContainer width="100%" height={Math.max(200, byType.length * 28)}>
               <BarChart data={byType} layout="vertical" margin={{ left: 0, right: 16 }}>
@@ -115,13 +130,14 @@ export default function Reports() {
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-sm text-gray-400 text-center py-8">Sem dados.</p>
+            <p className="text-sm text-gray-400 text-center py-8">Nenhum processo em andamento.</p>
           )}
         </div>
 
-        {/* Por unidade */}
+        {/* Por unidade (somente em andamento) */}
         <div className="bg-white rounded-xl border border-gray-100 p-6">
-          <h2 className="text-sm font-semibold text-gray-800 mb-5" style={{ fontFamily: "'Outfit', sans-serif" }}>Processos por Unidade</h2>
+          <h2 className="text-sm font-semibold text-gray-800 mb-1" style={{ fontFamily: "'Outfit', sans-serif" }}>Processos por Unidade</h2>
+          <p className="text-xs text-gray-400 mb-5">Apenas processos em andamento</p>
           {byUnit.length > 0 ? (
             <ResponsiveContainer width="100%" height={Math.max(200, byUnit.length * 28)}>
               <BarChart data={byUnit} layout="vertical" margin={{ left: 0, right: 16 }}>
@@ -136,7 +152,7 @@ export default function Reports() {
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-sm text-gray-400 text-center py-8">Sem dados.</p>
+            <p className="text-sm text-gray-400 text-center py-8">Nenhum processo em andamento.</p>
           )}
         </div>
       </div>
@@ -152,7 +168,7 @@ export default function Reports() {
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Qtd</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">%</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Com Resumo IA</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Com Resumo</th>
             </tr>
           </thead>
           <tbody>

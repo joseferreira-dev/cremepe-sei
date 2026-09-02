@@ -4,6 +4,7 @@ import { listProcesses, syncProcess } from '../api';
 import type { Process } from '../types';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
+import Pagination from './ui/Pagination';
 
 interface Props {
   navigateTo: (page: Page, id?: string) => void;
@@ -29,6 +30,8 @@ export default function SyncPage({ navigateTo }: Props) {
   const dialog = useDialog();
   const [processes, setProcesses] = useState<Process[]>([]);
   const [total, setTotal] = useState(0);
+  const [totalAndamento, setTotalAndamento] = useState(0);
+  const [totalConcluidos, setTotalConcluidos] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -40,10 +43,16 @@ export default function SyncPage({ navigateTo }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await listProcesses({ page, limit: perPage });
+      const [res, resAndamento, resConcluidos] = await Promise.all([
+        listProcesses({ page, limit: perPage }),
+        listProcesses({ page: 1, limit: 1, status: 'em_andamento' }),
+        listProcesses({ page: 1, limit: 1, status: 'finalizado' }),
+      ]);
       setProcesses(res.processes);
       setTotal(res.total);
-      setTotalPages(res.totalPages || 1);
+      setTotalPages(res.totalPages);
+      setTotalAndamento(resAndamento.total);
+      setTotalConcluidos(resConcluidos.total);
     } catch {
       setProcesses([]);
     } finally {
@@ -53,27 +62,33 @@ export default function SyncPage({ navigateTo }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
-  const concluidos = processes.filter((p) => p.status === 'finalizado');
-  const emAndamento = processes.filter((p) => p.status !== 'finalizado');
-
   const handleSyncAll = async () => {
     if (syncingAll) return;
-    const sindicaveis = processes.filter((p) => p.status !== 'finalizado');
-    if (sindicaveis.length === 0) {
+    if (totalAndamento === 0) {
       dialog.alert('Nenhum processo para sincronizar.');
       return;
     }
     setSyncingAll(true);
-    setSyncProgress({ done: 0, total: sindicaveis.length });
+    setSyncProgress({ done: 0, total: totalAndamento });
     let erros = 0;
+    let synced = 0;
     try {
-      for (let i = 0; i < sindicaveis.length; i++) {
-        setSyncProgress({ done: i + 1, total: sindicaveis.length });
-        try {
-          await syncProcess(sindicaveis[i].id);
-        } catch {
-          erros++;
+      let pageToFetch = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const allRes = await listProcesses({ page: pageToFetch, limit: 500, status: 'em_andamento' });
+        const sindicaveis = allRes.processes;
+        for (let i = 0; i < sindicaveis.length; i++) {
+          synced++;
+          setSyncProgress({ done: synced, total: totalAndamento });
+          try {
+            await syncProcess(sindicaveis[i].id);
+          } catch {
+            erros++;
+          }
         }
+        hasMore = sindicaveis.length === 500;
+        pageToFetch++;
       }
       if (erros > 0) {
         dialog.success(`Sincronização concluída. ${erros} processo(s) falharam.`);
@@ -109,12 +124,12 @@ export default function SyncPage({ navigateTo }: Props) {
             Sincronização
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            {total} processo(s) · {emAndamento.length} em andamento · {concluidos.length} concluído(s)
+            {total} processo(s) · {totalAndamento} em andamento · {totalConcluidos} concluído(s)
           </p>
         </div>
         <button
           onClick={handleSyncAll}
-          disabled={syncingAll || emAndamento.length === 0}
+          disabled={syncingAll || totalAndamento === 0}
           className="flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
           style={{ background: '#009C60' }}
         >
@@ -130,7 +145,7 @@ export default function SyncPage({ navigateTo }: Props) {
           )}
           {syncingAll
             ? `Sincronizando ${syncProgress?.done || 0}/${syncProgress?.total || 0}…`
-            : `Sincronizar em Andamento (${emAndamento.length})`}
+            : `Sincronizar em Andamento (${totalAndamento})`}
         </button>
       </div>
 
@@ -237,39 +252,7 @@ export default function SyncPage({ navigateTo }: Props) {
         </div>
 
         {/* Paginação */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-            <p className="text-xs text-gray-500">
-              Mostrando {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} de {total}
-            </p>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setPage(Math.max(1, page - 1))}
-                disabled={page === 1}
-                className="px-3 py-1 text-xs border rounded text-gray-600 hover:bg-gray-50 disabled:opacity-40"
-              >
-                Anterior
-              </button>
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setPage(n)}
-                  className="px-3 py-1 text-xs border rounded transition-colors"
-                  style={n === page ? { background: '#009C60', color: 'white', borderColor: '#009C60' } : {}}
-                >
-                  {n}
-                </button>
-              ))}
-              <button
-                onClick={() => setPage(Math.min(totalPages, page + 1))}
-                disabled={page === totalPages}
-                className="px-3 py-1 text-xs border rounded text-gray-600 hover:bg-gray-50 disabled:opacity-40"
-              >
-                Próximo
-              </button>
-            </div>
-          </div>
-        )}
+        <Pagination page={page} totalPages={totalPages} total={total} perPage={perPage} onPageChange={setPage} />
       </div>
     </div>
   );

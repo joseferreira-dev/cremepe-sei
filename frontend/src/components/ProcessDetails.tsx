@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../App';
 import type { User, Process, ProcessStatus, Annotation } from '../types';
-import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listDocumentos, getDocumentoLink, type DocumentoFromAndamento } from '../api';
+import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, saveSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listDocumentos, getDocumentoLink, type DocumentoFromAndamento } from '../api';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
 
@@ -33,6 +33,12 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
   const [resumoManualText, setResumoManualText] = useState('');
   const [generatingResume, setGeneratingResume] = useState(false);
   const [resumo, setResumo] = useState('');
+  const [resumoPreview, setResumoPreview] = useState<string | null>(null);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [savingResume, setSavingResume] = useState(false);
+  const [showEditResumoModal, setShowEditResumoModal] = useState(false);
+  const [editResumoText, setEditResumoText] = useState('');
+  const [savingEditResumo, setSavingEditResumo] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [statusError, setStatusError] = useState('');
   const [statusSaving, setStatusSaving] = useState(false);
@@ -121,8 +127,8 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     setGeneratingResume(true);
     try {
       const { resumo: generated } = await generateSummary(process.id, uploadFiles, resumoManualText);
-      setResumo(generated);
-      await getProcess(process.id).then(setProcess);
+      setResumoPreview(generated);
+      setShowPreviewModal(true);
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao gerar resumo.');
     } finally {
@@ -130,7 +136,44 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
       setShowUploadModal(false);
       setUploadFiles([]);
       setResumoManualText('');
+    }
+  };
+
+  const handleSaveResume = async () => {
+    if (!process || !resumoPreview) return;
+    setSavingResume(true);
+    try {
+      await saveSummary(process.id, resumoPreview);
+      setResumo(resumoPreview);
+      await getProcess(process.id).then(setProcess);
+      setShowPreviewModal(false);
+      setResumoPreview(null);
       setTab('resumo');
+      dialog.success('Resumo salvo com sucesso!');
+    } catch (e: any) {
+      dialog.error(e?.message || 'Erro ao salvar resumo.');
+    } finally {
+      setSavingResume(false);
+    }
+  };
+
+  const handleSaveEditResumo = async () => {
+    if (!process) return;
+    if (!editResumoText.trim()) {
+      dialog.alert('O resumo não pode estar vazio.');
+      return;
+    }
+    setSavingEditResumo(true);
+    try {
+      await saveSummary(process.id, editResumoText);
+      setResumo(editResumoText);
+      await getProcess(process.id).then(setProcess);
+      setShowEditResumoModal(false);
+      dialog.success('Resumo atualizado com sucesso!');
+    } catch (e: any) {
+      dialog.error(e?.message || 'Erro ao salvar resumo.');
+    } finally {
+      setSavingEditResumo(false);
     }
   };
 
@@ -191,7 +234,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
 
   const allTabs = [
     { id: 'sei', label: 'Dados SEI' },
-    { id: 'resumo', label: 'Resumo IA' },
+    { id: 'resumo', label: 'Resumo' },
     { id: 'andamentos', label: 'Andamentos' },
     { id: 'documentos', label: 'Documentos' },
     { id: 'anotacoes', label: `Anotações (${annotations.length})` },
@@ -414,17 +457,30 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
           {tab === 'resumo' && (
             <div>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-gray-800" style={{ fontFamily: "'Outfit', sans-serif" }}>Resumo Gerado por IA</h3>
-                <button
-                  onClick={() => setShowUploadModal(true)}
-                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white rounded-lg"
-                  style={{ background: '#29ABE2' }}
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  {resumo ? 'Regenerar Resumo' : 'Gerar Resumo com IA'}
-                </button>
+                <h3 className="font-semibold text-gray-800" style={{ fontFamily: "'Outfit', sans-serif" }}>Resumo</h3>
+                <div className="flex items-center gap-2">
+                  {resumo && (
+                    <button
+                      onClick={() => { setShowEditResumoModal(true); setEditResumoText(resumo); }}
+                      className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Editar
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowUploadModal(true)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white rounded-lg"
+                    style={{ background: '#29ABE2' }}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    {resumo ? 'Regenerar Resumo' : 'Gerar Resumo com IA'}
+                  </button>
+                </div>
               </div>
               {resumo ? (
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-5">
@@ -829,11 +885,11 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                   </svg>
                   <p className="text-sm text-gray-500">Arraste arquivos ou <span style={{ color: '#009C60' }}>clique para selecionar</span></p>
-                  <p className="text-xs text-gray-400 mt-1">PDF, DOCX, ODT, imagens (máx. 50 MB cada)</p>
+                  <p className="text-xs text-gray-400 mt-1">PDF, DOC, DOCX, XLS, XLSX, ODT, CSV, imagens (máx. 50 MB cada)</p>
                   <input
                     type="file"
                     multiple
-                    accept=".pdf,.docx,.odt,.jpg,.jpeg,.png"
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.odt,.csv,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.webp"
                     className="hidden"
                     onChange={(e) => setUploadFiles(Array.from(e.target.files ?? []))}
                   />
@@ -890,6 +946,94 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
                 style={{ background: '#29ABE2' }}
               >
                 {generatingResume ? 'Gerando…' : 'Gerar Resumo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preview Resumo Modal */}
+      {showPreviewModal && resumoPreview && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <h2 className="text-lg font-bold text-gray-900" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                Pré-visualização do Resumo
+              </h2>
+              <button onClick={() => { setShowPreviewModal(false); setResumoPreview(null); }} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6 max-h-[60vh] overflow-y-auto">
+              <div className="bg-gray-50 rounded-xl p-5">
+                <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{resumoPreview}</p>
+              </div>
+            </div>
+            <div className="flex gap-3 p-6 border-t border-gray-100">
+              <button
+                onClick={() => { setShowPreviewModal(false); setResumoPreview(null); }}
+                className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => { setShowPreviewModal(false); setShowUploadModal(true); }}
+                className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Editar e Regenerar
+              </button>
+              <button
+                onClick={handleSaveResume}
+                disabled={savingResume}
+                className="flex-1 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                style={{ background: '#009C60' }}
+              >
+                {savingResume ? 'Salvando…' : 'Confirmar e Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Resumo Modal */}
+      {showEditResumoModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <h2 className="text-lg font-bold text-gray-900" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                Editar Resumo
+              </h2>
+              <button onClick={() => setShowEditResumoModal(false)} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6">
+              <textarea
+                value={editResumoText}
+                onChange={(e) => setEditResumoText(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-green-500/30"
+                rows={12}
+                placeholder="Edite o resumo aqui…"
+              />
+            </div>
+            <div className="flex gap-3 p-6 border-t border-gray-100">
+              <button
+                onClick={() => setShowEditResumoModal(false)}
+                className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveEditResumo}
+                disabled={savingEditResumo || !editResumoText.trim()}
+                className="flex-1 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                style={{ background: '#009C60' }}
+              >
+                {savingEditResumo ? 'Salvando…' : 'Salvar Alterações'}
               </button>
             </div>
           </div>

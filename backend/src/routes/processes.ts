@@ -72,12 +72,16 @@ router.get("/", async (req: Request, res: Response) => {
       status = "",
       unit = "",
       resumo = "",
+      tipo = "",
+      nivelAcesso = "",
+      dateFrom = "",
+      dateTo = "",
       sort = "createdAt",
       dir = "desc",
     } = req.query as Record<string, string>;
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
+    const limitNum = Math.min(500, Math.max(1, parseInt(limit, 10) || 10));
     const skip = (pageNum - 1) * limitNum;
 
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
@@ -111,6 +115,21 @@ router.get("/", async (req: Request, res: Response) => {
       where.resumoIa = { not: "" };
     } else if (resumo === "0") {
       where.resumoIa = null;
+    }
+
+    if (tipo && tipo !== "all") {
+      where.tipo = tipo;
+    }
+
+    if (nivelAcesso && nivelAcesso !== "all") {
+      where.nivelAcesso = nivelAcesso;
+    }
+
+    if (dateFrom) {
+      where.dataAutuacao = { ...where.dataAutuacao, gte: dateFrom };
+    }
+    if (dateTo) {
+      where.dataAutuacao = { ...where.dataAutuacao, lte: dateTo };
     }
 
     if (userRole !== "admin") {
@@ -811,7 +830,37 @@ router.delete("/:id", async (req: Request, res: Response) => {
   }
 });
 
-// Generate AI summary
+// Save AI summary to process
+router.post("/:id/resumo/save", async (req: Request, res: Response) => {
+  try {
+    const process = await prisma.process.findUnique({ where: { id: req.params.id } });
+    if (!process) {
+      res.status(404).json({ error: "Processo não encontrado." });
+      return;
+    }
+
+    const { resumo } = req.body;
+    if (!resumo || typeof resumo !== "string" || !resumo.trim()) {
+      res.status(400).json({ error: "Resumo não fornecido." });
+      return;
+    }
+
+    const updated = await prisma.process.update({
+      where: { id: process.id },
+      data: {
+        resumoIa: resumo.trim(),
+        resumoGeradoEm: new Date(),
+      },
+    });
+
+    res.json({ process: updated });
+  } catch (error: any) {
+    console.error("[RESUMO] Save error:", error);
+    res.status(500).json({ error: `Erro ao salvar resumo: ${error.message}` });
+  }
+});
+
+// Generate AI summary (preview only)
 router.post("/:id/resumo", upload.array("files", 20), async (req: Request, res: Response) => {
   const files = req.files as Express.Multer.File[];
   const tempPaths: string[] = [];
@@ -856,15 +905,7 @@ router.post("/:id/resumo", upload.array("files", 20), async (req: Request, res: 
 
     const resumo = await gerarResumo(textoCompleto);
 
-    const updated = await prisma.process.update({
-      where: { id: process.id },
-      data: {
-        resumoIa: resumo,
-        resumoGeradoEm: new Date(),
-      },
-    });
-
-    res.json({ resumo, process: updated });
+    res.json({ resumo });
   } catch (error: any) {
     console.error("[RESUMO] Generation error:", error);
     res.status(500).json({ error: `Erro ao gerar resumo: ${error.message}` });

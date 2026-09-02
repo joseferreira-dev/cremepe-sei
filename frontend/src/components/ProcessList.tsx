@@ -4,6 +4,7 @@ import { listProcesses, deleteProcess, listUnidades, type SeiUnidade } from '../
 import type { Process, ProcessStatus, User } from '../types';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
+import Pagination from './ui/Pagination';
 
 interface Props {
   navigateTo: (page: Page, id?: string) => void;
@@ -23,6 +24,10 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [unitFilter, setUnitFilter] = useState<string>('all');
+  const [tipoFilter, setTipoFilter] = useState<string>('all');
+  const [nivelFilter, setNivelFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<string>('createdAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -32,10 +37,16 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState<SeiUnidade[]>([]);
+  const [tipos, setTipos] = useState<string[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
   const perPage = 10;
 
   useEffect(() => {
     listUnidades().then(setUnits).catch(() => setUnits([]));
+    listProcesses({ limit: 500 }).then((res) => {
+      const unique = [...new Set(res.processes.map((p) => p.tipo).filter(Boolean))].sort();
+      setTipos(unique);
+    }).catch(() => {});
   }, []);
 
   const load = useCallback(async () => {
@@ -48,6 +59,10 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
         status: statusFilter,
         unit: unitFilter,
         resumo: onlyWithoutResumo ? '0' : 'all',
+        tipo: tipoFilter,
+        nivelAcesso: nivelFilter,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
       });
       setData(res.processes);
       setTotal(res.total);
@@ -57,7 +72,7 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, unitFilter, onlyWithoutResumo]);
+  }, [page, search, statusFilter, unitFilter, onlyWithoutResumo, tipoFilter, nivelFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     load();
@@ -132,45 +147,94 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-xl border border-gray-100 p-4 flex flex-wrap gap-3 items-center">
-        <div className="relative flex-1 min-w-[200px]">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Buscar por número, especificação ou interessado…"
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30"
-          />
-        </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
-        >
-          <option value="all">Todos os status</option>
-          <option value="em_andamento">Em Andamento</option>
-          <option value="pendente">Pendente</option>
-          <option value="finalizado">Finalizado</option>
-          <option value="sobrestado">Sobrestado</option>
-        </select>
-        <select
-          value={unitFilter}
-          onChange={(e) => { setUnitFilter(e.target.value); setPage(1); }}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
-        >
-          <option value="all">Todas as unidades</option>
-          {units.map((u) => <option key={u.id} value={u.sigla}>{u.sigla}</option>)}
-        </select>
-        {(search || statusFilter !== 'all' || unitFilter !== 'all') && (
-          <button
-            onClick={() => { setSearch(''); setStatusFilter('all'); setUnitFilter('all'); setPage(1); }}
-            className="text-sm text-gray-500 hover:text-red-500 transition-colors"
+      <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
+        <div className="flex flex-wrap gap-3 items-center">
+          <div className="relative flex-1 min-w-[200px]">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Buscar por número, especificação ou interessado…"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
           >
-            Limpar filtros
+            <option value="all">Todos os status</option>
+            <option value="em_andamento">Em Andamento</option>
+            <option value="finalizado">Finalizado</option>
+          </select>
+          <select
+            value={unitFilter}
+            onChange={(e) => { setUnitFilter(e.target.value); setPage(1); }}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
+          >
+            <option value="all">Todas as unidades</option>
+            {units.map((u) => <option key={u.id} value={u.sigla}>{u.sigla}</option>)}
+          </select>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+            </svg>
+            {showFilters ? 'Ocultar filtros' : 'Mais filtros'}
           </button>
+          {(search || statusFilter !== 'all' || unitFilter !== 'all' || tipoFilter !== 'all' || nivelFilter !== 'all' || dateFrom || dateTo) && (
+            <button
+              onClick={() => { setSearch(''); setStatusFilter('all'); setUnitFilter('all'); setTipoFilter('all'); setNivelFilter('all'); setDateFrom(''); setDateTo(''); setPage(1); }}
+              className="text-sm text-gray-500 hover:text-red-500 transition-colors"
+            >
+              Limpar filtros
+            </button>
+          )}
+        </div>
+
+        {showFilters && (
+          <div className="flex flex-wrap gap-3 items-center pt-2 border-t border-gray-100">
+            <select
+              value={tipoFilter}
+              onChange={(e) => { setTipoFilter(e.target.value); setPage(1); }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
+            >
+              <option value="all">Todos os tipos</option>
+              {tipos.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select
+              value={nivelFilter}
+              onChange={(e) => { setNivelFilter(e.target.value); setPage(1); }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30 bg-white"
+            >
+              <option value="all">Todos os níveis</option>
+              <option value="Público">Público</option>
+              <option value="Restrito">Restrito</option>
+            </select>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500">De:</label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500">Até:</label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30"
+              />
+            </div>
+          </div>
         )}
       </div>
 
@@ -211,7 +275,7 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Unidades</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[200px]">Resumo IA</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[200px]">Resumo</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide cursor-pointer whitespace-nowrap" onClick={() => toggleSort('dataAutuacao')}>
                   Autuação <SortIcon col="dataAutuacao" />
                 </th>
@@ -309,39 +373,7 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
         </div>
 
         {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-            <p className="text-xs text-gray-500">
-              Mostrando {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} de {total}
-            </p>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setPage(Math.max(1, page - 1))}
-                disabled={page === 1}
-                className="px-3 py-1 text-xs border rounded text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors"
-              >
-                Anterior
-              </button>
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setPage(n)}
-                  className="px-3 py-1 text-xs border rounded transition-colors"
-                  style={n === page ? { background: '#009C60', color: 'white', borderColor: '#009C60' } : {}}
-                >
-                  {n}
-                </button>
-              ))}
-              <button
-                onClick={() => setPage(Math.min(totalPages, page + 1))}
-                disabled={page === totalPages}
-                className="px-3 py-1 text-xs border rounded text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors"
-              >
-                Próximo
-              </button>
-            </div>
-          </div>
-        )}
+        <Pagination page={page} totalPages={totalPages} total={total} perPage={perPage} onPageChange={setPage} />
       </div>
     </div>
   );
