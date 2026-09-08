@@ -148,7 +148,6 @@ function mapStatus(raw: string): Process['status'] {
 }
 
 export function mapProcess(p: BackendProcess): Process {
-  const anyP = p as any;
   return {
     id: p.id,
     numeroSei: p.numeroSei,
@@ -165,12 +164,12 @@ export function mapProcess(p: BackendProcess): Process {
     procedimentosRelacionados: Array.isArray(p.procedimentosRelacionados) ? p.procedimentosRelacionados : [],
     procedimentosAnexados: Array.isArray(p.procedimentosAnexados) ? p.procedimentosAnexados : [],
     ultimoAndamento: p.ultimoAndamento || { descricao: '', dataHora: '', usuario: '', unidade: '' },
-    status: mapStatus(p.statusSistema || anyP.status || 'em_andamento'),
+    status: mapStatus(p.statusSistema || 'em_andamento'),
     resumoIa: p.resumoIa || undefined,
     resumoGeradoEm: p.resumoGeradoEm || undefined,
     sincronizadoEm: p.sincronizadoEm || '',
-    tags: Array.isArray(anyP.tags) ? anyP.tags : [],
-    annotations: Array.isArray(anyP.annotations) ? anyP.annotations : [],
+    tags: Array.isArray(p.tags) ? p.tags : [],
+    annotations: Array.isArray(p.annotations) ? p.annotations : [],
     createdAt: p.createdAt,
   };
 }
@@ -242,6 +241,7 @@ export async function syncProcess(id: string): Promise<Process> {
 export async function syncBatch(ids: string[]): Promise<{ results: { id: string; status: string; mensagem: string }[]; total: number }> {
   return request(`/processes/sync-batch`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids }),
   });
 }
@@ -350,12 +350,6 @@ export async function listAndamentos(processId: string): Promise<Andamento[]> {
   return data.andamentos || [];
 }
 
-export interface DocumentoFromAndamento {
-  idDocumento: string;
-  tipo: string;
-  descricao: string;
-}
-
 export interface ProcessoPai {
   id: string;
   numero: string;
@@ -366,16 +360,6 @@ export interface ProcessoPai {
 export async function listProcessosPai(processId: string): Promise<ProcessoPai[]> {
   const data = await request<{ pais: ProcessoPai[] }>(`/processes/${processId}/pais`);
   return data.pais || [];
-}
-
-export async function listDocumentos(processId: string): Promise<DocumentoFromAndamento[]> {
-  const data = await request<{ documentos: DocumentoFromAndamento[] }>(`/processes/${processId}/documentos`);
-  return data.documentos || [];
-}
-
-export async function getDocumentoLink(processId: string, numeroDocumento: string): Promise<string> {
-  const data = await request<{ link: string }>(`/processes/${processId}/documentos/${numeroDocumento}/link`);
-  return data.link;
 }
 
 // ---- Tags ----

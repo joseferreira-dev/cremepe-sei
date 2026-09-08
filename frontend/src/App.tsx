@@ -12,7 +12,7 @@ import SyncPage from './components/SyncPage';
 import Profile from './components/Profile';
 import { DialogProvider } from './components/ui/Dialog';
 import type { User } from './types';
-import { login as apiLogin, loadStoredUser, clearSession, getToken, fetchMe } from './api';
+import { login as apiLogin, loadStoredUser, clearSession, fetchMe } from './api';
 
 export type Page =
   | 'dashboard'

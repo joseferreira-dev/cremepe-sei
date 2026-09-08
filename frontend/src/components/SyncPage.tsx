@@ -121,8 +121,11 @@ export default function SyncPage({ navigateTo }: Props) {
         });
         const sindicaveis = allRes.processes;
         const ids = sindicaveis.map((p) => p.id);
-        if (ids.length > 0) {
-          const result = await syncBatch(ids);
+        // Processa em sub-lotes de 5 para atualizar a barra com frequência
+        const SUB_LOTE = 5;
+        for (let i = 0; i < ids.length; i += SUB_LOTE) {
+          const subLote = ids.slice(i, i + SUB_LOTE);
+          const result = await syncBatch(subLote);
           const falhas = result.results.filter((r) => r.status === "error");
           erros += falhas.length;
           synced += result.results.length;

@@ -618,7 +618,8 @@ function parseSoapResponse(xml: string): SeiProcesso {
 }
 
 export async function consultarProcedimento(
-  numeroProcesso: string
+  numeroProcesso: string,
+  unidadeAtualId?: string
 ): Promise<SeiProcesso> {
   // Define as unidades nas quais a busca será feita. Sem unidade padrão:
   // busca em todas as unidades CREMEPE retornadas por listarUnidades.
@@ -640,9 +641,23 @@ export async function consultarProcedimento(
     throw new Error("Nenhuma unidade CREMEPE disponível para consulta no SEI.");
   }
 
+  // Se temos unidadeAtual, tenta ela primeiro (maior chance de acerto)
+  if (unidadeAtualId) {
+    try {
+      const soapBody = buildSoapEnvelope(numeroProcesso, unidadeAtualId);
+      const xml = await fetchSoap(soapBody, "Sei#consultarProcedimento");
+      return parseSoapResponse(xml);
+    } catch {
+      // Não encontrou na unidade atual, continua buscando
+    }
+  }
+
   let lastError: Error | null = null;
 
   for (const unidade of unidades) {
+    // Pula a unidadeAtual pois já tentamos
+    if (unidadeAtualId && unidade.IdUnidade === unidadeAtualId) continue;
+
     // Envia para cada unidade e interrompe assim que encontrar o processo
     // (parseSoapResponse lança erro quando o processo não existe na unidade).
     try {
@@ -762,20 +777,21 @@ export async function listarAndamentos(
   unidades: Unidade[]
 ): Promise<Andamento[]> {
   const allAndamentos: Andamento[] = [];
+  const SOAP_CONCURRENCY = 10;
 
-  for (const unidade of unidades) {
-    try {
-      const soapBody = buildListarAndamentosEnvelope(unidade.IdUnidade, numeroProcesso);
-      const xml = await fetchSoap(soapBody, "Sei#listarAndamentos");
-
-      if (xml.includes("<faultstring>")) {
-        continue; // Unidade não tem acesso, ignora
-      }
-
-      const andamentos = parseAndamentos(xml);
-      allAndamentos.push(...andamentos);
-    } catch {
-      // Falha ao buscar andamentos desta unidade, ignora
+  // Executa chamadas SOAP em paralelo com limite de concorrência
+  for (let i = 0; i < unidades.length; i += SOAP_CONCURRENCY) {
+    const lote = unidades.slice(i, i + SOAP_CONCURRENCY);
+    const resultados = await Promise.allSettled(
+      lote.map(async (unidade) => {
+        const soapBody = buildListarAndamentosEnvelope(unidade.IdUnidade, numeroProcesso);
+        const xml = await fetchSoap(soapBody, "Sei#listarAndamentos");
+        if (xml.includes("<faultstring>")) return [];
+        return parseAndamentos(xml);
+      })
+    );
+    for (const r of resultados) {
+      if (r.status === "fulfilled") allAndamentos.push(...r.value);
     }
   }
 

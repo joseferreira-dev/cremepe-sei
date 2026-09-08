@@ -1,15 +1,12 @@
 import { Router, Request, Response } from "express";
 import multer from "multer";
-import { randomUUID } from "crypto";
 import { unlink, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { prisma } from "../db/prisma.js";
 import { authMiddleware } from "../middleware/auth.js";
-import { consultarProcedimento, listarAndamentos, listarUnidades, isProcessoConcluido, consultarDocumento, extrairDocumentos, obterLinkDocumento, montarUnidadesParaBusca } from "../services/sei.js";
-import type { DocumentoFromAndamento } from "../services/sei.js";
+import { consultarProcedimento, listarAndamentos, listarUnidades, isProcessoConcluido, montarUnidadesParaBusca } from "../services/sei.js";
 import { gerarResumo } from "../services/gemini.js";
 import { extrairTexto } from "../services/fileExtractor.js";
-import { AppError } from "../utils/errors.js";
 
 const UPLOAD_DIR = join(process.cwd(), "uploads");
 
@@ -32,33 +29,6 @@ const upload = multer({
 });
 
 const router = Router();
-
-// Rota de teste pública (remover depois)
-router.get("/test-documento/:idDocumento", async (req: Request, res: Response) => {
-  try {
-    const { idDocumento } = req.params;
-    const unidades = await listarUnidades();
-    let lastError: any = null;
-
-    for (const unidade of unidades) {
-      try {
-        const doc = await consultarDocumento(idDocumento, unidade.IdUnidade);
-        res.json({
-          documento: doc,
-          unidadeConsulta: unidade.Sigla,
-        });
-        return;
-      } catch (err: any) {
-        lastError = err;
-      }
-    }
-
-    res.status(404).json({ error: `Documento não encontrado: ${lastError?.message}` });
-  } catch (error: any) {
-    console.error("[TEST] Error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
 
 router.use(authMiddleware);
 
@@ -111,8 +81,7 @@ router.get("/", async (req: Request, res: Response) => {
     }
 
     if (resumo === "1") {
-      where.resumoIa = { not: null };
-      where.resumoIa = { not: "" };
+      where.AND = [{ resumoIa: { not: null } }, { resumoIa: { not: "" } }];
     } else if (resumo === "0") {
       where.resumoIa = null;
     }
@@ -304,7 +273,6 @@ router.get("/:id/andamentos", async (req: Request, res: Response) => {
   }
 });
 
-// List documents extracted from andamentos
 // Find processes that have THIS process as annexed (reverse relationship)
 router.get("/:id/pais", async (req: Request, res: Response) => {
   try {
@@ -336,39 +304,6 @@ router.get("/:id/pais", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/:id/documentos", async (req: Request, res: Response) => {
-  try {
-    const process = await prisma.process.findUnique({ where: { id: req.params.id } });
-    if (!process) {
-      res.status(404).json({ error: "Processo não encontrado." });
-      return;
-    }
-
-    const documentos = JSON.parse(process.documentos || "[]");
-    res.json({ documentos });
-  } catch (error: any) {
-    console.error("[DOCUMENTOS] List error:", error);
-    res.status(500).json({ error: `Erro ao listar documentos: ${error.message}` });
-  }
-});
-
-// Get direct link to a document in SEI
-router.get("/:id/documentos/:numeroDocumento/link", async (req: Request, res: Response) => {
-  try {
-    const { numeroDocumento } = req.params;
-    const link = await obterLinkDocumento(numeroDocumento);
-    if (!link) {
-      res.status(404).json({ error: "Link do documento não encontrado no SEI." });
-      return;
-    }
-    res.json({ link });
-  } catch (error: any) {
-    console.error("[DOCUMENTOS] Link error:", error);
-    res.status(500).json({ error: `Erro ao obter link: ${error.message}` });
-  }
-});
-
-// Get document content (HTML or download link)
 // Create process manually
 router.post("/", async (req: Request, res: Response) => {
   try {
@@ -413,18 +348,16 @@ router.post("/", async (req: Request, res: Response) => {
       }
     }
 
-    // Busca andamentos de todas as unidades abertas do processo
+    // Busca andamentos: unidades abertas ou cascata completa (para processos finalizados)
     let andamentosData: any[] = [];
-    if (unidades.length > 0) {
-      try {
-        const seiUnidades = unidades.map((u) => ({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao }));
-        andamentosData = await listarAndamentos(numeroSei, seiUnidades);
-      } catch {
-        // Falha ao buscar andamentos não impede o cadastro
-      }
+    const unidadesParaBuscar = unidades.length > 0
+      ? unidades.map((u) => ({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao }))
+      : montarUnidadesParaBusca(null, [], await listarUnidades().catch(() => []));
+    try {
+      andamentosData = await listarAndamentos(numeroSei, unidadesParaBuscar);
+    } catch {
+      // Falha ao buscar andamentos não impede o cadastro
     }
-
-    const documentosInitial = extrairDocumentos(andamentosData as any);
 
     // Detecta se processo está concluído
     const concluido = isProcessoConcluido(
@@ -434,6 +367,24 @@ router.post("/", async (req: Request, res: Response) => {
       (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
     );
 
+    // Otimização: herança - busca apenas processos finalizados
+    let paiFinalizado = false;
+    if (!concluido) {
+      const finalizedProcs = await prisma.process.findMany({
+        where: { statusSistema: "finalizado" },
+        select: { procedimentosAnexados: true },
+      });
+      for (const other of finalizedProcs) {
+        try {
+          const anexados = JSON.parse(other.procedimentosAnexados || "[]");
+          if (anexados.some((a: any) => a.numero === numeroSei)) {
+            paiFinalizado = true;
+            break;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
     const processo = await prisma.process.create({
       data: {
         numeroSei,
@@ -442,7 +393,7 @@ router.post("/", async (req: Request, res: Response) => {
         dataAutuacao: seiData.DataAutuacao || null,
         nivelAcesso: seiData.NivelAcesso || null,
         linkSei: seiData.LinkAcesso || null,
-        statusSistema: concluido ? "finalizado" : "em_andamento",
+        statusSistema: (concluido || paiFinalizado) ? "finalizado" : "em_andamento",
         assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
         interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
         unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({
@@ -458,7 +409,6 @@ router.post("/", async (req: Request, res: Response) => {
           usuario: a.Usuario?.Nome || "",
           unidade: a.Unidade?.Sigla || "",
         }))),
-        documentos: JSON.stringify(documentosInitial),
         procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
           id: p.IdProcedimento,
           numero: p.ProcedimentoFormatado,
@@ -512,6 +462,12 @@ router.post("/import", async (req: Request, res: Response) => {
     const userUnits = await prisma.userUnit.findMany({ where: { userId: req.user!.userId } });
     const userUnitSiglas = userUnits.map((u) => u.unitSigla);
 
+    // Busca unidades UMA ÚNICA VEZ antes do loop (cachê de 5min)
+    let todasUnidadesGlobal: any[] = [];
+    try {
+      todasUnidadesGlobal = await listarUnidades();
+    } catch { /* ignore */ }
+
     const results: { numero: string; status: string; mensagem: string; processId?: string }[] = [];
 
     // Importação paralela com concorrência limitada (5 simultâneos)
@@ -536,17 +492,6 @@ router.post("/import", async (req: Request, res: Response) => {
           descricao: u.Unidade.Descricao,
         }));
 
-        // Busca unidades para consultar andamentos usando cascata priorizada
-        let todasUnidadesBatch: any[] = [];
-        try {
-          todasUnidadesBatch = await listarUnidades();
-        } catch { /* ignore */ }
-        const unidadesParaBuscaBatch = montarUnidadesParaBusca(
-          null,
-          unidadesAbertasBatch,
-          todasUnidadesBatch,
-        );
-
         if (userRole !== "admin") {
           const hasAccess = unidadesAbertasBatch.some((u: any) => userUnitSiglas.includes(u.sigla));
           if (!hasAccess) {
@@ -554,18 +499,18 @@ router.post("/import", async (req: Request, res: Response) => {
           }
         }
 
+        // Busca andamentos: unidades abertas ou cascata completa (para processos finalizados)
         let andamentosBatch: any[] = [];
         let unidadesComDadosBatch: string[] = [];
-        if (unidadesParaBuscaBatch.length > 0) {
-          try {
-            andamentosBatch = await listarAndamentos(num, unidadesParaBuscaBatch);
-            if (andamentosBatch.length > 0) {
-              unidadesComDadosBatch = Array.from(new Set(andamentosBatch.map((a: any) => a.Unidade?.IdUnidade).filter(Boolean)));
-            }
-          } catch { /* falha não impede importação */ }
-        }
-
-        const documentosBatch = extrairDocumentos(andamentosBatch as any);
+        const unidadesParaBuscarBatch = unidadesAbertasBatch.length > 0
+          ? unidadesAbertasBatch.map((u) => ({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao }))
+          : montarUnidadesParaBusca(null, [], todasUnidadesGlobal);
+        try {
+          andamentosBatch = await listarAndamentos(num, unidadesParaBuscarBatch);
+          if (andamentosBatch.length > 0) {
+            unidadesComDadosBatch = Array.from(new Set(andamentosBatch.map((a: any) => a.Unidade?.IdUnidade).filter(Boolean)));
+          }
+        } catch { /* falha não impede importação */ }
 
         const concluidoBatch = isProcessoConcluido(
           unidadesAbertasBatch,
@@ -574,14 +519,14 @@ router.post("/import", async (req: Request, res: Response) => {
           (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
         );
 
-        // Herança de status: se algum processo pai já existe no banco e está finalizado, este também fica
+        // Otimização: herança - busca apenas processos finalizados
         let paiFinalizadoBatch = false;
         if (!concluidoBatch) {
-          const allProcs = await prisma.process.findMany({
-            select: { procedimentosAnexados: true, statusSistema: true },
+          const finalizedProcs = await prisma.process.findMany({
+            where: { statusSistema: "finalizado" },
+            select: { procedimentosAnexados: true },
           });
-          for (const other of allProcs) {
-            if (other.statusSistema !== "finalizado") continue;
+          for (const other of finalizedProcs) {
             try {
               const anexados = JSON.parse(other.procedimentosAnexados || "[]");
               if (anexados.some((a: any) => a.numero === num)) {
@@ -617,7 +562,6 @@ router.post("/import", async (req: Request, res: Response) => {
               usuario: a.Usuario?.Nome || "",
               unidade: a.Unidade?.Sigla || "",
             }))),
-            documentos: JSON.stringify(documentosBatch),
             procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
               id: p.IdProcedimento,
               numero: p.ProcedimentoFormatado,
@@ -658,7 +602,7 @@ router.post("/import", async (req: Request, res: Response) => {
     await prisma.syncLog.create({
       data: {
         tipo: "batch",
-        status: errors === 0 ? "success" : "success",
+        status: errors === 0 ? "success" : "error",
         mensagem: `Importação em lote: ${numeros.length} processos processados, ${successes} importados, ${errors} falhas.`,
       },
     });
@@ -692,7 +636,14 @@ router.post("/sync-batch", async (req: Request, res: Response) => {
           return { id, status: "skipped", mensagem: "Processo já finalizado." };
         }
 
-        const seiData = await consultarProcedimento(proc.numeroSei);
+        // Extrai unidadeAtualId do processo salvo no banco
+        let unidadeAtualId: string | undefined;
+        try {
+          const ua = proc.unidadeAtual ? JSON.parse(proc.unidadeAtual) : null;
+          unidadeAtualId = ua?.id;
+        } catch { /* ignore */ }
+
+        const seiData = await consultarProcedimento(proc.numeroSei, unidadeAtualId);
         const unidadesAbertas = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
           id: u.Unidade.IdUnidade,
           sigla: u.Unidade.Sigla,
@@ -700,34 +651,32 @@ router.post("/sync-batch", async (req: Request, res: Response) => {
         }));
         const unidadesReais = [...unidadesAbertas];
 
-        let todasUnidades: any[] = [];
-        try { todasUnidades = await listarUnidades(); } catch { /* ignore */ }
-        const unidadesParaBuscar = montarUnidadesParaBusca(proc.unidadeSincronizacao, unidadesAbertas, todasUnidades);
+        // Compara UltimoAndamento com o salvo no banco
+        const ultimoAndamentoNovo = seiData.UltimoAndamento?.Descricao || null;
+        const ultimoAndamentoAntigo = proc.ultimoAndamento
+          ? JSON.parse(proc.ultimoAndamento).descricao
+          : null;
+        const andamentoMudou = ultimoAndamentoNovo !== ultimoAndamentoAntigo;
+        const andamentosVazios = !proc.andamentos || JSON.parse(proc.andamentos || "[]").length === 0;
 
         let andamentosSync: any[] = [];
         let unidadesComDados: string[] = [];
-        if (unidadesParaBuscar.length > 0) {
-          try {
-            andamentosSync = await listarAndamentos(proc.numeroSei, unidadesParaBuscar);
-            if (andamentosSync.length > 0) {
-              unidadesComDados = Array.from(new Set(andamentosSync.map((a: any) => a.Unidade?.IdUnidade).filter(Boolean)));
-            }
-          } catch { /* ignore */ }
-        }
 
-        const documentosExistentes: DocumentoFromAndamento[] = JSON.parse(proc.documentos || "[]");
-        const andamentosParaExtrair = andamentosSync.map((a) => ({
-          IdAndamento: a.IdAndamento,
-          Descricao: a.Descricao,
-          DataHora: a.DataHora,
-          Usuario: a.Usuario ? { Sigla: a.Usuario.Sigla || "", Nome: a.Usuario.Nome || "" } : null,
-          Unidade: a.Unidade ? { IdUnidade: a.Unidade.IdUnidade || "", Sigla: a.Unidade.Sigla || "", Descricao: a.Unidade.Descricao || "" } : null,
-        }));
-        const novosDocumentos = extrairDocumentos(andamentosParaExtrair as any);
-        const docsMap = new Map<string, DocumentoFromAndamento>();
-        for (const d of documentosExistentes) docsMap.set(d.idDocumento, d);
-        for (const d of novosDocumentos) { if (!docsMap.has(d.idDocumento)) docsMap.set(d.idDocumento, d); }
-        const documentosFinais = Array.from(docsMap.values());
+        if (andamentoMudou || andamentosVazios) {
+          // Busca andamentos se mudou ou se estavam vazios (importação inicial sem unidades abertas)
+          let todasUnidades: any[] = [];
+          try { todasUnidades = await listarUnidades(); } catch { /* ignore */ }
+          const unidadesParaBuscar = montarUnidadesParaBusca(proc.unidadeSincronizacao, unidadesAbertas, todasUnidades);
+
+          if (unidadesParaBuscar.length > 0) {
+            try {
+              andamentosSync = await listarAndamentos(proc.numeroSei, unidadesParaBuscar);
+              if (andamentosSync.length > 0) {
+                unidadesComDados = Array.from(new Set(andamentosSync.map((a: any) => a.Unidade?.IdUnidade).filter(Boolean)));
+              }
+            } catch { /* ignore */ }
+          }
+        }
 
         const andamentosSyncParsed = andamentosSync.map((a) => ({
           id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora,
@@ -735,12 +684,39 @@ router.post("/sync-batch", async (req: Request, res: Response) => {
         }));
         const ultimoAndSync = andamentosSyncParsed.length > 0 ? andamentosSyncParsed[0] : null;
 
+        // Só verifica herança se tem procedimentosRelacionados
+        let paiFinalizado = false;
+        const relatedNumeros = (seiData.ProcedimentosRelacionados || []).map((p) => p.ProcedimentoFormatado);
         const anexadosNumeros = (seiData.ProcedimentosAnexados || []).map((p) => p.ProcedimentoFormatado);
-        const relatedNumeros = (seiData.ProcedimentosRelacionados || []).map((p) => p.ProcedimentoFormatado).filter((n) => !anexadosNumeros.includes(n));
+        const soRelacionados = relatedNumeros.filter((n) => !anexadosNumeros.includes(n));
+
         const parentStatusMap = new Map<string, string>();
-        if (relatedNumeros.length > 0) {
-          const parents = await prisma.process.findMany({ where: { numeroSei: { in: relatedNumeros } }, select: { numeroSei: true, statusSistema: true } });
+        if (soRelacionados.length > 0) {
+          const parents = await prisma.process.findMany({ where: { numeroSei: { in: soRelacionados } }, select: { numeroSei: true, statusSistema: true } });
           for (const p of parents) parentStatusMap.set(p.numeroSei, p.statusSistema);
+
+          // Verifica se todos os pais são finalizados
+          const todosPaisFinalizados = soRelacionados.every((n) => parentStatusMap.get(n) === "finalizado");
+          if (todosPaisFinalizados) {
+            paiFinalizado = true;
+          }
+
+          // Se nenhum pai está finalizado, verifica herança (processo pai que anexa este)
+          if (!paiFinalizado) {
+            const allProcs = await prisma.process.findMany({
+              where: { id: { not: proc.id }, statusSistema: "finalizado" },
+              select: { procedimentosAnexados: true },
+            });
+            for (const other of allProcs) {
+              try {
+                const anexados = JSON.parse(other.procedimentosAnexados || "[]");
+                if (anexados.some((a: any) => a.numero === proc.numeroSei)) {
+                  paiFinalizado = true;
+                  break;
+                }
+              } catch { /* ignore */ }
+            }
+          }
         }
 
         const concluido = isProcessoConcluido(
@@ -751,23 +727,9 @@ router.post("/sync-batch", async (req: Request, res: Response) => {
           parentStatusMap,
         );
 
-        // Herança de status: se algum processo pai (que anexou este) está finalizado, este também fica
-        let paiFinalizado = false;
-        if (!concluido) {
-          const allProcs = await prisma.process.findMany({
-            where: { id: { not: proc.id } },
-            select: { procedimentosAnexados: true, statusSistema: true },
-          });
-          for (const other of allProcs) {
-            if (other.statusSistema !== "finalizado") continue;
-            try {
-              const anexados = JSON.parse(other.procedimentosAnexados || "[]");
-              if (anexados.some((a: any) => a.numero === proc.numeroSei)) {
-                paiFinalizado = true;
-                break;
-              }
-            } catch { /* ignore */ }
-          }
+        // Se nada mudou e não há herança de status, pula update
+        if (!andamentoMudou && !paiFinalizado && concluido === (proc.statusSistema === "finalizado")) {
+          return { id: proc.id, status: "skipped", mensagem: "Sem alterações." };
         }
 
         await prisma.process.update({
@@ -783,7 +745,6 @@ router.post("/sync-batch", async (req: Request, res: Response) => {
             unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({ id: seiData.UnidadeAtual.IdUnidade, sigla: seiData.UnidadeAtual.Sigla, descricao: seiData.UnidadeAtual.Descricao }) : proc.unidadeAtual,
             unidades: JSON.stringify(unidadesReais),
             andamentos: JSON.stringify(andamentosSync.map((a) => ({ id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora, usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "" }))),
-            documentos: JSON.stringify(documentosFinais),
             unidadeSincronizacao: unidadesComDados.length > 0 ? JSON.stringify(unidadesComDados.map((id) => ({ id }))) : proc.unidadeSincronizacao,
             procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: p.TipoProcedimento?.Nome || "" }))),
             procedimentosAnexados: JSON.stringify((seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: p.TipoProcedimento?.Nome || "" }))),
@@ -822,7 +783,14 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
 
     let seiData;
     try {
-      seiData = await consultarProcedimento(process.numeroSei);
+      // Extrai unidadeAtualId do processo salvo no banco
+      let unidadeAtualId: string | undefined;
+      try {
+        const ua = process.unidadeAtual ? JSON.parse(process.unidadeAtual) : null;
+        unidadeAtualId = ua?.id;
+      } catch { /* ignore */ }
+
+      seiData = await consultarProcedimento(process.numeroSei, unidadeAtualId);
     } catch (err: any) {
       await prisma.syncLog.create({
         data: {
@@ -846,47 +814,41 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
     // Unidades reais = apenas as abertas no SEI (para salvar no banco)
     const unidadesReais = [...unidadesAbertas];
 
-    // Busca unidades para consultar andamentos usando cascata priorizada
-    let todasUnidades: any[] = [];
-    try {
-      todasUnidades = await listarUnidades();
-    } catch { /* ignore */ }
-    const unidadesParaBuscar = montarUnidadesParaBusca(
-      process.unidadeSincronizacao,
-      unidadesAbertas,
-      todasUnidades,
-    );
+    // Compara UltimoAndamento com o salvo no banco
+    const ultimoAndamentoNovo = seiData.UltimoAndamento?.Descricao || null;
+    const ultimoAndamentoAntigo = process.ultimoAndamento
+      ? JSON.parse(process.ultimoAndamento).descricao
+      : null;
+    const andamentoMudou = ultimoAndamentoNovo !== ultimoAndamentoAntigo;
+    const andamentosVazios = !process.andamentos || JSON.parse(process.andamentos || "[]").length === 0;
 
     let andamentosSync: any[] = [];
     let unidadesComDados: string[] = [];
-    if (unidadesParaBuscar.length > 0) {
+
+    if (andamentoMudou || andamentosVazios) {
+      // Busca andamentos se mudou ou se estavam vazios (importação inicial sem unidades abertas)
+      let todasUnidades: any[] = [];
       try {
-        andamentosSync = await listarAndamentos(process.numeroSei, unidadesParaBuscar);
-        // Registra quais unidades retornaram andamentos
-        if (andamentosSync.length > 0) {
-          const unidadesComAndamentos = new Set(andamentosSync.map((a: any) => a.Unidade?.IdUnidade).filter(Boolean));
-          unidadesComDados = Array.from(unidadesComAndamentos);
+        todasUnidades = await listarUnidades();
+      } catch { /* ignore */ }
+      const unidadesParaBuscar = montarUnidadesParaBusca(
+        process.unidadeSincronizacao,
+        unidadesAbertas,
+        todasUnidades,
+      );
+
+      if (unidadesParaBuscar.length > 0) {
+        try {
+          andamentosSync = await listarAndamentos(process.numeroSei, unidadesParaBuscar);
+          if (andamentosSync.length > 0) {
+            const unidadesComAndamentos = new Set(andamentosSync.map((a: any) => a.Unidade?.IdUnidade).filter(Boolean));
+            unidadesComDados = Array.from(unidadesComAndamentos);
+          }
+        } catch (err: any) {
+          console.warn(`[SYNC] ${process.numeroSei}: falha ao listar andamentos: ${err.message}`);
         }
-      } catch (err: any) {
-        console.warn(`[SYNC] ${process.numeroSei}: falha ao listar andamentos: ${err.message}`);
       }
     }
-
-    const documentosExistentes: DocumentoFromAndamento[] = JSON.parse(process.documentos || "[]");
-    const andamentosParaExtrair = andamentosSync.map((a) => ({
-      IdAndamento: a.IdAndamento,
-      Descricao: a.Descricao,
-      DataHora: a.DataHora,
-      Usuario: a.Usuario ? { Sigla: a.Usuario.Sigla || "", Nome: a.Usuario.Nome || "" } : null,
-      Unidade: a.Unidade ? { IdUnidade: a.Unidade.IdUnidade || "", Sigla: a.Unidade.Sigla || "", Descricao: a.Unidade.Descricao || "" } : null,
-    }));
-    const novosDocumentos = extrairDocumentos(andamentosParaExtrair as any);
-    const docsMap = new Map<string, DocumentoFromAndamento>();
-    for (const d of documentosExistentes) docsMap.set(d.idDocumento, d);
-    for (const d of novosDocumentos) {
-      if (!docsMap.has(d.idDocumento)) docsMap.set(d.idDocumento, d);
-    }
-    const documentosFinais = Array.from(docsMap.values());
 
     // Detecta se processo está concluído
     const andamentosSyncParsed = andamentosSync.map((a) => ({
@@ -895,7 +857,7 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
     }));
     const ultimoAndSync = andamentosSyncParsed.length > 0 ? andamentosSyncParsed[0] : null;
 
-    // Busca status dos processos pai no banco (para verificar se todos são concluídos)
+    // Busca status dos processos pai no banco (só se tem procedimentosRelacionados)
     const anexadosNumeros = (seiData.ProcedimentosAnexados || []).map((p) => p.ProcedimentoFormatado);
     const relatedNumeros = (seiData.ProcedimentosRelacionados || [])
       .map((p) => p.ProcedimentoFormatado)
@@ -922,13 +884,12 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
 
     // Herança de status: se algum processo pai (que anexou este) está finalizado, este também fica
     let paiFinalizado = false;
-    if (!concluido) {
+    if (!concluido && relatedNumeros.length > 0) {
       const allProcs = await prisma.process.findMany({
-        where: { id: { not: process.id } },
-        select: { procedimentosAnexados: true, statusSistema: true },
+        where: { id: { not: process.id }, statusSistema: "finalizado" },
+        select: { procedimentosAnexados: true },
       });
       for (const other of allProcs) {
-        if (other.statusSistema !== "finalizado") continue;
         try {
           const anexados = JSON.parse(other.procedimentosAnexados || "[]");
           if (anexados.some((a: any) => a.numero === process.numeroSei)) {
@@ -962,7 +923,6 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
           usuario: a.Usuario?.Nome || "",
           unidade: a.Unidade?.Sigla || "",
         }))),
-        documentos: JSON.stringify(documentosFinais),
         unidadeSincronizacao: unidadesComDados.length > 0 ? JSON.stringify(unidadesComDados.map((id) => ({ id }))) : process.unidadeSincronizacao,
         procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
           id: p.IdProcedimento,
@@ -1160,6 +1120,11 @@ router.post("/:id/resumo", upload.array("files", 20), async (req: Request, res: 
 
     if (!textoCompleto.trim()) {
       res.status(422).json({ error: "Não foi possível extrair texto dos arquivos enviados." });
+      return;
+    }
+
+    if (textoCompleto.length > 90000) {
+      res.status(413).json({ error: "Texto excessivo. Envie menos arquivos ou reduza o texto para gerar o resumo." });
       return;
     }
 

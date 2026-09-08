@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { Page } from '../App';
-import type { User, Process, ProcessStatus, Annotation } from '../types';
-import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, saveSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listDocumentos, getDocumentoLink, listProcessosPai, type DocumentoFromAndamento, type ProcessoPai } from '../api';
+import type { User, Process, ProcessStatus, Annotation, Tag } from '../types';
+import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, saveSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listProcessosPai, type ProcessoPai } from '../api';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
 
@@ -22,12 +22,12 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
   const dialog = useDialog();
   const [process, setProcess] = useState<Process | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [tab, setTab] = useState<'sei' | 'resumo' | 'andamentos' | 'documentos' | 'anotacoes' | 'tags' | 'relacionados'>('sei');
+  const [tab, setTab] = useState<'sei' | 'resumo' | 'andamentos' | 'anotacoes' | 'tags' | 'relacionados'>('sei');
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [newAnnotation, setNewAnnotation] = useState('');
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
   const [editAnnotationText, setEditAnnotationText] = useState('');
-  const [availTags, setAvailTags] = useState(process?.tags ?? []);
+  const [availTags, setAvailTags] = useState<Tag[]>([]);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [resumoManualText, setResumoManualText] = useState('');
@@ -42,8 +42,6 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
   const [syncLoading, setSyncLoading] = useState(false);
   const [statusError, setStatusError] = useState('');
   const [statusSaving, setStatusSaving] = useState(false);
-  const [documentos, setDocumentos] = useState<DocumentoFromAndamento[]>([]);
-  const [docsLoading, setDocsLoading] = useState(false);
   const [processosPai, setProcessosPai] = useState<ProcessoPai[]>([]);
   const [paisLoading, setPaisLoading] = useState(false);
 
@@ -51,7 +49,6 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     if (!processId) { setNotFound(true); return; }
     setNotFound(false);
     setProcessosPai([]);
-    setDocumentos([]);
     getProcess(processId)
       .then((p) => {
         setProcess(p);
@@ -63,13 +60,6 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
   }, [processId]);
 
   useEffect(() => {
-    if (tab === 'documentos' && processId && documentos.length === 0 && !docsLoading) {
-      setDocsLoading(true);
-      listDocumentos(processId)
-        .then(setDocumentos)
-        .catch(() => {})
-        .finally(() => setDocsLoading(false));
-    }
     if (tab === 'relacionados' && processId && processosPai.length === 0 && !paisLoading) {
       setPaisLoading(true);
       listProcessosPai(processId)
@@ -90,7 +80,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     );
   }
 
-  const acessoRestrito = (process as any).acessoRestrito === true;
+  const acessoRestrito = process.nivelAcesso === 'Restrito' && user.role !== 'admin';
 
   const cfg = statusConfig[process.status];
 
@@ -247,13 +237,10 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     { id: 'sei', label: 'Dados SEI' },
     { id: 'resumo', label: 'Resumo' },
     { id: 'andamentos', label: 'Andamentos' },
-    { id: 'documentos', label: 'Documentos' },
     { id: 'anotacoes', label: `Anotações (${annotations.length})` },
     { id: 'tags', label: 'Tags' },
     { id: 'relacionados', label: 'Processos Relacionados' },
   ] as const;
-
-  const tabs = allTabs;
 
   const handleClickRelated = async (numero: string) => {
     const existing = await findProcessByNumero(numero);
@@ -292,7 +279,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
           </svg>
           <p className="text-amber-800 text-sm">
-            Acesso restrito —可视化受限，仅可查看基本信息。
+            Acesso restrito
           </p>
         </div>
       )}
@@ -375,7 +362,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
       {/* Tabs */}
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         <div className="border-b border-gray-100 flex">
-          {tabs.map((t) => (
+          {allTabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
@@ -559,81 +546,6 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
                       </div>
                     </div>
                   ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Documentos */}
-          {tab === 'documentos' && (
-            <div>
-              <h3 className="font-semibold text-gray-800 mb-4" style={{ fontFamily: "'Outfit', sans-serif" }}>
-                Documentos do Processo
-              </h3>
-              {docsLoading ? (
-                <div className="text-center py-12 text-gray-400">
-                  <svg className="animate-spin w-8 h-8 mx-auto mb-3" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                  <p className="text-sm">Buscando documentos no SEI…</p>
-                </div>
-              ) : documentos.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
-                  <svg className="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                  </svg>
-                  <p className="text-sm">Nenhum documento encontrado nos andamentos.</p>
-                  <p className="text-xs mt-1">Faça uma sincronização para buscar os andamentos no SEI.</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {documentos.filter((d) => d.tipo !== 'excluido').map((doc) => (
-                    <div key={doc.idDocumento} className="flex items-center gap-3 px-4 py-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors group">
-                      <div className="w-8 h-8 rounded flex items-center justify-center text-white text-[10px] font-bold shrink-0" style={{ background: '#29ABE2' }}>
-                        📄
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-sm font-semibold text-gray-800">{doc.idDocumento}</span>
-                          <span className="text-xs font-medium px-2 py-0.5 rounded bg-blue-50 text-blue-700">{doc.tipo}</span>
-                        </div>
-                        <p className="text-xs text-gray-500 truncate">{doc.descricao}</p>
-                      </div>
-                      <button
-                        onClick={async () => {
-                          try {
-                            const link = await getDocumentoLink(process.id, doc.idDocumento);
-                            window.open(link, '_blank');
-                          } catch {
-                            if (process.linkSei) window.open(process.linkSei, '_blank');
-                          }
-                        }}
-                        className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded transition-all"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                        Abrir no SEI
-                      </button>
-                    </div>
-                  ))}
-                  {documentos.filter((d) => d.tipo === 'excluido').length > 0 && (
-                    <details className="mt-4">
-                      <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">
-                        {documentos.filter((d) => d.tipo === 'excluido').length} documento(s) excluído(s)
-                      </summary>
-                      <div className="space-y-1 mt-2">
-                        {documentos.filter((d) => d.tipo === 'excluido').map((doc) => (
-                          <div key={doc.idDocumento} className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-400">
-                            <span className="font-mono line-through">{doc.idDocumento}</span>
-                            <span>—</span>
-                            <span>{doc.descricao}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  )}
                 </div>
               )}
             </div>
