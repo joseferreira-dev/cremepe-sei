@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import Login from './components/Login';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -14,22 +15,40 @@ import { DialogProvider } from './components/ui/Dialog';
 import type { User } from './types';
 import { login as apiLogin, loadStoredUser, clearSession, fetchMe } from './api';
 
-export type Page =
-  | 'dashboard'
-  | 'processes'
-  | 'processes-sem-resumo'
-  | 'process-details'
-  | 'new-process'
-  | 'tags'
-  | 'reports'
-  | 'sync'
-  | 'admin'
-  | 'profile';
+function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User) => void; onLogout: () => void }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    // Redireciona para dashboard se a URL não existe
+    const validPaths = ['/', '/processes', '/processes/sem-resumo', '/new-process', '/tags', '/reports', '/sync', '/admin', '/profile'];
+    const isProcessDetails = /^\/process\/[a-f0-9-]+$/.test(location.pathname);
+    if (!validPaths.includes(location.pathname) && !isProcessDetails && location.pathname !== '/') {
+      navigate('/', { replace: true });
+    }
+  }, [location.pathname, navigate]);
+
+  return (
+    <Layout user={user} currentPage={location.pathname} onLogout={onLogout}>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/processes" element={<ProcessList user={user} />} />
+        <Route path="/processes/sem-resumo" element={<ProcessList onlyWithoutResumo user={user} />} />
+        <Route path="/process/:id" element={<ProcessDetails user={user} />} />
+        <Route path="/new-process" element={<NewProcess />} />
+        <Route path="/tags" element={<TagsManager />} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/sync" element={<SyncPage />} />
+        <Route path="/admin" element={<Admin user={user} onUserUpdated={setUser} />} />
+        <Route path="/profile" element={<Profile user={user} />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Layout>
+  );
+}
 
 export default function App() {
   const [user, setUser] = useState<User | null>(() => loadStoredUser());
-  const [page, setPage] = useState<Page>('dashboard');
-  const [selectedProcessId, setSelectedProcessId] = useState<string | null>(null);
 
   useEffect(() => {
     const onUnauthorized = () => setUser(null);
@@ -52,7 +71,6 @@ export default function App() {
     try {
       const data = await apiLogin(email, password);
       setUser(data.user);
-      setPage('dashboard');
       return null;
     } catch (err: any) {
       return err?.message || 'Erro ao autenticar.';
@@ -62,50 +80,17 @@ export default function App() {
   const handleLogout = () => {
     clearSession();
     setUser(null);
-    setPage('dashboard');
-  };
-
-  const navigateTo = (p: Page, processId?: string) => {
-    setPage(p);
-    if (processId) setSelectedProcessId(processId);
   };
 
   if (!user) {
     return <Login onLogin={handleLogin} />;
   }
 
-  const renderPage = () => {
-    switch (page) {
-      case 'dashboard':
-        return <Dashboard navigateTo={navigateTo} />;
-      case 'processes':
-        return <ProcessList navigateTo={navigateTo} user={user} />;
-      case 'processes-sem-resumo':
-        return <ProcessList navigateTo={navigateTo} onlyWithoutResumo user={user} />;
-      case 'process-details':
-        return <ProcessDetails processId={selectedProcessId} navigateTo={navigateTo} user={user} />;
-      case 'new-process':
-        return <NewProcess navigateTo={navigateTo} />;
-      case 'tags':
-        return <TagsManager />;
-      case 'reports':
-        return <Reports />;
-      case 'sync':
-        return <SyncPage navigateTo={navigateTo} />;
-      case 'admin':
-        return <Admin user={user} onUserUpdated={setUser} />;
-      case 'profile':
-        return <Profile user={user} />;
-      default:
-        return <Dashboard navigateTo={navigateTo} />;
-    }
-  };
-
   return (
     <DialogProvider>
-      <Layout user={user} currentPage={page} navigateTo={navigateTo} onLogout={handleLogout}>
-        {renderPage()}
-      </Layout>
+      <BrowserRouter>
+        <AppRoutes user={user} setUser={setUser} onLogout={handleLogout} />
+      </BrowserRouter>
     </DialogProvider>
   );
 }

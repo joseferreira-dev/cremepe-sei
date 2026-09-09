@@ -1,10 +1,6 @@
 import { useState } from 'react';
-import type { Page } from '../App';
+import { useNavigate } from 'react-router-dom';
 import { createProcess } from '../api';
-
-interface Props {
-  navigateTo: (page: Page) => void;
-}
 
 interface ImportResult {
   numero: string;
@@ -24,10 +20,11 @@ const PLACEHOLDER = `Cole os números dos processos (o sistema extrai automatica
 26.17.000008588-9
 25.17.000009817-9
 26.17.000009307-5
-26.17.000010045-1
+27.17.000010045-1
 26.17.000009336-9`;
 
-export default function NewProcess({ navigateTo }: Props) {
+export default function NewProcess() {
+  const navigate = useNavigate();
   const [inputText, setInputText] = useState('');
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -77,7 +74,7 @@ export default function NewProcess({ navigateTo }: Props) {
   return (
     <div className="p-8 max-w-6xl" style={{ fontFamily: "'Inter', sans-serif" }}>
       <div className="flex items-center gap-2 text-sm text-gray-500 mb-6">
-        <button onClick={() => navigateTo('processes')} className="hover:underline" style={{ color: '#009C60' }}>
+        <button onClick={() => navigate('/processes')} className="hover:underline" style={{ color: '#009C60' }}>
           Processos
         </button>
         <span>/</span>
@@ -183,7 +180,7 @@ export default function NewProcess({ navigateTo }: Props) {
                 Nova Importação
               </button>
               <button
-                onClick={() => navigateTo('processes')}
+                onClick={() => navigate('/processes')}
                 className="px-4 py-2 text-sm font-medium rounded-lg text-white"
                 style={{ background: '#009C60' }}
               >

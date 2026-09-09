@@ -1,14 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Page } from '../App';
+import { useNavigate } from 'react-router-dom';
 import { listProcesses, syncBatch, syncProcess, listUnidades, type SeiUnidade } from '../api';
 import type { Process } from '../types';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
 import Pagination from './ui/Pagination';
-
-interface Props {
-  navigateTo: (page: Page, id?: string) => void;
-}
 
 function tempoDesde(dataIso: string | null): string {
   if (!dataIso) return 'Nunca';
@@ -26,7 +22,8 @@ function tempoDesde(dataIso: string | null): string {
   return partes.join(', ');
 }
 
-export default function SyncPage({ navigateTo }: Props) {
+export default function SyncPage() {
+  const navigate = useNavigate();
   const dialog = useDialog();
   const [processes, setProcesses] = useState<Process[]>([]);
   const [total, setTotal] = useState(0);
@@ -170,7 +167,7 @@ export default function SyncPage({ navigateTo }: Props) {
             Sincronização
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            {total} processo(s) · {totalAndamento} em andamento · {totalConcluidos} concluído(s)
+            {total} processo(s) selecionados(s) · {totalAndamento} em andamento · {totalConcluidos} concluído(s)
           </p>
         </div>
         <button
@@ -327,13 +324,14 @@ export default function SyncPage({ navigateTo }: Props) {
                 return (
                   <tr key={p.id} className={`border-b border-gray-50 ${isConcluido ? 'bg-gray-50/60' : ''}`}>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => navigateTo('process-details', p.id)}
+                      <a
+                        href={'/process/' + p.id}
+                        onClick={(e) => { e.preventDefault(); navigate('/process/' + p.id); }}
                         className="font-mono text-xs font-semibold hover:underline"
                         style={{ color: '#009C60' }}
                       >
                         {p.numeroSei}
-                      </button>
+                      </a>
                     </td>
                     <td className="px-4 py-3 max-w-[300px]">
                       <p className="text-gray-800 text-xs truncate">{p.especificacao}</p>

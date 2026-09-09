@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Page } from '../App';
+import { useNavigate } from 'react-router-dom';
 import { listProcesses, deleteProcess, listUnidades, type SeiUnidade } from '../api';
 import type { Process, ProcessStatus, User } from '../types';
 import { formatDataPtBR } from '../utils/date';
@@ -7,7 +7,6 @@ import { useDialog } from './ui/Dialog';
 import Pagination from './ui/Pagination';
 
 interface Props {
-  navigateTo: (page: Page, id?: string) => void;
   onlyWithoutResumo?: boolean;
   user?: User;
 }
@@ -19,7 +18,8 @@ const statusConfig: Record<ProcessStatus, { label: string; color: string; bg: st
   sobrestado: { label: 'Sobrestado', color: '#374151', bg: '#F3F4F6' },
 };
 
-export default function ProcessList({ navigateTo, onlyWithoutResumo = false, user }: Props) {
+export default function ProcessList({ onlyWithoutResumo = false, user }: Props) {
+  const navigate = useNavigate();
   const dialog = useDialog();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -133,7 +133,7 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => navigateTo('new-process')}
+            onClick={() => navigate('/new-process')}
             className="flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors"
             style={{ background: '#009C60' }}
           >
@@ -297,13 +297,14 @@ export default function ProcessList({ navigateTo, onlyWithoutResumo = false, use
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => navigateTo('process-details', p.id)}
+                      <a
+                        href={'/process/' + p.id}
+                        onClick={(e) => { e.preventDefault(); navigate('/process/' + p.id); }}
                         className="font-mono text-xs font-semibold hover:underline"
                         style={{ color: '#009C60' }}
                       >
                         {p.numeroSei}
-                      </button>
+                      </a>
                     </td>
                     <td className="px-4 py-3 max-w-[320px]">
                       <p className="text-gray-800 text-xs leading-relaxed line-clamp-2">{p.especificacao}</p>

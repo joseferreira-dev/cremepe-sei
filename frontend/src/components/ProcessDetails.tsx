@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react';
-import type { Page } from '../App';
+import { useNavigate, useParams } from 'react-router-dom';
 import type { User, Process, ProcessStatus, Annotation, Tag } from '../types';
 import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, saveSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listProcessosPai, type ProcessoPai } from '../api';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
 
 interface Props {
-  processId: string | null;
-  navigateTo: (page: Page, id?: string) => void;
   user: User;
 }
 
@@ -18,7 +16,9 @@ const statusConfig: Record<ProcessStatus, { label: string; color: string; bg: st
   sobrestado: { label: 'Sobrestado', color: '#374151', bg: '#F3F4F6' },
 };
 
-export default function ProcessDetails({ processId, navigateTo, user }: Props) {
+export default function ProcessDetails({ user }: Props) {
+  const { id: processId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const dialog = useDialog();
   const [process, setProcess] = useState<Process | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -73,7 +73,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     return (
       <div className="p-8 text-center">
         <p className="text-gray-500">Processo não encontrado ou carregando…</p>
-        <button onClick={() => navigateTo('processes')} className="mt-4 text-sm" style={{ color: '#009C60' }}>
+        <button onClick={() => navigate('/processes')} className="mt-4 text-sm" style={{ color: '#009C60' }}>
           ← Voltar para lista
         </button>
       </div>
@@ -198,7 +198,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     if (!ok) return;
     try {
       await deleteProcess(process.id);
-      navigateTo('processes');
+      navigate('/processes');
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao excluir processo.');
     }
@@ -245,7 +245,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
   const handleClickRelated = async (numero: string) => {
     const existing = await findProcessByNumero(numero);
     if (existing) {
-      navigateTo('process-details', existing.id);
+      navigate('/process/' + existing.id);
       return;
     }
     const ok = await dialog.confirm(
@@ -255,7 +255,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     if (!ok) return;
     try {
       const created = await createProcess(numero);
-      navigateTo('process-details', created.id);
+      navigate('/process/' + created.id);
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao cadastrar processo.');
     }
@@ -265,7 +265,7 @@ export default function ProcessDetails({ processId, navigateTo, user }: Props) {
     <div className="p-8 space-y-6 max-w-5xl" style={{ fontFamily: "'Inter', sans-serif" }}>
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-gray-500">
-        <button onClick={() => navigateTo('processes')} className="hover:underline" style={{ color: '#009C60' }}>
+        <button onClick={() => navigate('/processes')} className="hover:underline" style={{ color: '#009C60' }}>
           Processos
         </button>
         <span>/</span>

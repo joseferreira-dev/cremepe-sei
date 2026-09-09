@@ -744,7 +744,9 @@ router.post("/sync-batch", async (req: Request, res: Response) => {
             interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
             unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({ id: seiData.UnidadeAtual.IdUnidade, sigla: seiData.UnidadeAtual.Sigla, descricao: seiData.UnidadeAtual.Descricao }) : proc.unidadeAtual,
             unidades: JSON.stringify(unidadesReais),
-            andamentos: JSON.stringify(andamentosSync.map((a) => ({ id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora, usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "" }))),
+            andamentos: andamentosSync.length > 0
+              ? JSON.stringify(andamentosSync.map((a) => ({ id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora, usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "" })))
+              : proc.andamentos,
             unidadeSincronizacao: unidadesComDados.length > 0 ? JSON.stringify(unidadesComDados.map((id) => ({ id }))) : proc.unidadeSincronizacao,
             procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: p.TipoProcedimento?.Nome || "" }))),
             procedimentosAnexados: JSON.stringify((seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: p.TipoProcedimento?.Nome || "" }))),
@@ -916,13 +918,9 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
           descricao: seiData.UnidadeAtual.Descricao,
         }) : process.unidadeAtual,
         unidades: JSON.stringify(unidadesReais),
-        andamentos: JSON.stringify(andamentosSync.map((a) => ({
-          id: a.IdAndamento,
-          descricao: a.Descricao,
-          dataHora: a.DataHora,
-          usuario: a.Usuario?.Nome || "",
-          unidade: a.Unidade?.Sigla || "",
-        }))),
+        andamentos: andamentosSync.length > 0
+          ? JSON.stringify(andamentosSync.map((a) => ({ id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora, usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "" })))
+          : process.andamentos,
         unidadeSincronizacao: unidadesComDados.length > 0 ? JSON.stringify(unidadesComDados.map((id) => ({ id }))) : process.unidadeSincronizacao,
         procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
           id: p.IdProcedimento,

@@ -1,12 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import type { Page } from '../App';
+import { useNavigate } from 'react-router-dom';
 import type { Process } from '../types';
 import { listProcesses } from '../api';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-
-interface Props {
-  navigateTo: (page: Page, id?: string) => void;
-}
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   em_andamento: { label: 'Em Andamento', color: '#29ABE2' },
@@ -15,7 +11,8 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   sobrestado: { label: 'Sobrestado', color: '#6B7280' },
 };
 
-export default function Dashboard({ navigateTo }: Props) {
+export default function Dashboard() {
+  const navigate = useNavigate();
   const [processes, setProcesses] = useState<Process[]>([]);
   const [emAndamentoProcesses, setEmAndamentoProcesses] = useState<Process[]>([]);
   const [counts, setCounts] = useState({ total: 0, comResumo: 0, emAndamento: 0, finalizados: 0 });
@@ -64,10 +61,10 @@ export default function Dashboard({ navigateTo }: Props) {
     .slice(0, 5);
 
   const kpis = [
-    { label: 'Total de Processos', value: counts.total, color: '#009C60', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', page: 'processes' as Page },
-    { label: 'Com Resumo', value: counts.comResumo, color: '#29ABE2', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', page: 'processes-sem-resumo' as Page },
-    { label: 'Em Andamento', value: counts.emAndamento, color: '#6366F1', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', page: 'processes' as Page },
-    { label: 'Finalizados', value: counts.finalizados, color: '#8DC63F', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', page: 'processes' as Page },
+    { label: 'Total de Processos', value: counts.total, color: '#009C60', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', path: '/processes' },
+    { label: 'Com Resumo', value: counts.comResumo, color: '#29ABE2', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', path: '/processes/sem-resumo' },
+    { label: 'Em Andamento', value: counts.emAndamento, color: '#6366F1', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', path: '/processes' },
+    { label: 'Finalizados', value: counts.finalizados, color: '#8DC63F', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', path: '/processes' },
   ];
 
   return (
@@ -82,7 +79,7 @@ export default function Dashboard({ navigateTo }: Props) {
         {kpis.map((kpi) => (
           <button
             key={kpi.label}
-            onClick={() => navigateTo(kpi.page)}
+            onClick={() => navigate(kpi.path)}
             className="bg-white rounded-xl border border-gray-100 p-5 text-left hover:shadow-md transition-shadow"
           >
             <div className="flex items-start justify-between">
@@ -131,7 +128,7 @@ export default function Dashboard({ navigateTo }: Props) {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-800" style={{ fontFamily: "'Outfit', sans-serif" }}>Últimos Processos Cadastrados</h2>
             <button
-              onClick={() => navigateTo('processes')}
+              onClick={() => navigate('/processes')}
               className="text-xs font-medium hover:underline"
               style={{ color: '#009C60' }}
             >
@@ -142,9 +139,10 @@ export default function Dashboard({ navigateTo }: Props) {
             {recent.map((p) => {
               const cfg = statusConfig[p.status] || statusConfig.em_andamento;
               return (
-                <button
+                <a
                   key={p.id}
-                  onClick={() => navigateTo('process-details', p.id)}
+                  href={'/process/' + p.id}
+                  onClick={(e) => { e.preventDefault(); navigate('/process/' + p.id); }}
                   className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left"
                 >
                   <div
@@ -160,7 +158,7 @@ export default function Dashboard({ navigateTo }: Props) {
                   <div className="text-xs text-gray-400 shrink-0">
                     {p.unidades.length > 0 ? p.unidades[0].sigla : '—'}
                   </div>
-                </button>
+                </a>
               );
             })}
             {recent.length === 0 && (
@@ -173,13 +171,13 @@ export default function Dashboard({ navigateTo }: Props) {
       {/* Quick actions */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Cadastrar Processo', desc: 'Via SEI', page: 'new-process' as Page, color: '#009C60', icon: 'M12 4v16m8-8H4' },
-          { label: 'Sincronização', desc: 'Atualizar dados do SEI', page: 'sync' as Page, color: '#6366F1', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
-          { label: 'Relatórios', desc: 'Análise consolidada', page: 'reports' as Page, color: '#8DC63F', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+          { label: 'Cadastrar Processo', desc: 'Via SEI', path: '/new-process', color: '#009C60', icon: 'M12 4v16m8-8H4' },
+          { label: 'Sincronização', desc: 'Atualizar dados do SEI', path: '/sync', color: '#6366F1', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+          { label: 'Relatórios', desc: 'Análise consolidada', path: '/reports', color: '#8DC63F', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
         ].map((action) => (
           <button
             key={action.label}
-            onClick={() => navigateTo(action.page)}
+            onClick={() => navigate(action.path)}
             className="bg-white border border-gray-100 rounded-xl p-5 flex items-center gap-4 hover:shadow-md transition-shadow text-left"
           >
             <div className="rounded-xl p-3" style={{ background: action.color + '18' }}>
