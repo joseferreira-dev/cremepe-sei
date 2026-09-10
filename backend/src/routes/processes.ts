@@ -32,6 +32,314 @@ const router = Router();
 
 router.use(authMiddleware);
 
+interface SyncResult {
+  status: "success" | "skipped" | "error";
+  mensagem: string;
+  autoImportados?: number;
+}
+
+interface ProcessoAcesso {
+  nivelAcesso: string | null;
+  unidades: string | null;
+  unidadeAtual: string | null;
+}
+
+function siglasDoProcesso(process: ProcessoAcesso): string[] {
+  const processUnidades = JSON.parse(process.unidades || "[]");
+  const processUnidadeAtual = process.unidadeAtual ? JSON.parse(process.unidadeAtual) : null;
+  return [
+    ...processUnidades.map((u: any) => u.sigla),
+    ...(processUnidadeAtual?.sigla ? [processUnidadeAtual.sigla] : []),
+  ];
+}
+
+function verificarAcessoProcesso(
+  process: ProcessoAcesso,
+  userRole: string,
+  userUnitSiglas: string[],
+): { permitido: boolean; motivo?: string } {
+  if (userRole === "admin") return { permitido: true };
+  const isInUserUnits = siglasDoProcesso(process).some((s) => userUnitSiglas.includes(s));
+  if (userRole === "assistente" && !isInUserUnits) {
+    return { permitido: false, motivo: "Acesso negado a este processo." };
+  }
+  if (userRole === "analista" && process.nivelAcesso?.includes("Restrito") && !isInUserUnits) {
+    return { permitido: false, motivo: "Acesso restrito a este processo." };
+  }
+  return { permitido: true };
+}
+
+async function permissaoDeAcesso(userId: string, process: ProcessoAcesso) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const userRole = user?.role || "assistente";
+  if (userRole === "admin") {
+    return { userRole, userUnitSiglas: [] as string[], acesso: { permitido: true } as { permitido: boolean; motivo?: string } };
+  }
+  const userUnits = await prisma.userUnit.findMany({ where: { userId } });
+  const userUnitSiglas = userUnits.map((u) => u.unitSigla);
+  return { userRole, userUnitSiglas, acesso: verificarAcessoProcesso(process, userRole, userUnitSiglas) };
+}
+
+async function syncProcesso(
+  procId: string,
+  autoImport?: { userRole: string; userUnitSiglas: string[]; todasUnidades: any[] },
+): Promise<SyncResult> {
+  const proc = await prisma.process.findUnique({ where: { id: procId } });
+  if (!proc) return { status: "error", mensagem: "Processo não encontrado." };
+
+  let unidadeAtualId: string | undefined;
+  try {
+    const ua = proc.unidadeAtual ? JSON.parse(proc.unidadeAtual) : null;
+    unidadeAtualId = ua?.id;
+  } catch { /* ignore */ }
+
+  const seiData = await consultarProcedimento(proc.numeroSei, unidadeAtualId);
+
+  const unidadesAbertas = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
+    id: u.Unidade.IdUnidade,
+    sigla: u.Unidade.Sigla,
+    descricao: u.Unidade.Descricao,
+  }));
+  const unidadesReais = [...unidadesAbertas];
+
+  const ultimoAndamentoNovo = seiData.UltimoAndamento?.Descricao || null;
+  const ultimoAndamentoAntigo = proc.ultimoAndamento
+    ? JSON.parse(proc.ultimoAndamento).descricao
+    : null;
+  const andamentoMudou = ultimoAndamentoNovo !== ultimoAndamentoAntigo;
+  const andamentosVazios = !proc.andamentos || JSON.parse(proc.andamentos || "[]").length === 0;
+
+  let andamentosSync: any[] = [];
+  let unidadesComDados: string[] = [];
+
+  if (andamentoMudou || andamentosVazios) {
+    let todasUnidades: any[] = [];
+    try { todasUnidades = await listarUnidades(); } catch { /* ignore */ }
+    const unidadesParaBuscar = montarUnidadesParaBusca(proc.unidadeSincronizacao, unidadesAbertas, todasUnidades);
+
+    if (unidadesParaBuscar.length > 0) {
+      try {
+        andamentosSync = await listarAndamentos(proc.numeroSei, unidadesParaBuscar);
+        if (andamentosSync.length > 0) {
+          unidadesComDados = Array.from(new Set(andamentosSync.map((a: any) => a.Unidade?.IdUnidade).filter(Boolean)));
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  const andamentosSyncParsed = andamentosSync.map((a) => ({
+    id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora,
+    usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "",
+  }));
+  const ultimoAndSync = andamentosSyncParsed.length > 0 ? andamentosSyncParsed[0] : null;
+
+  const relatedNumeros = (seiData.ProcedimentosRelacionados || []).map((p) => p.ProcedimentoFormatado);
+  const anexadosNumeros = (seiData.ProcedimentosAnexados || []).map((p) => p.ProcedimentoFormatado);
+  const soRelacionados = relatedNumeros.filter((n) => !anexadosNumeros.includes(n));
+
+  const parentStatusMap = new Map<string, string>();
+  if (soRelacionados.length > 0) {
+    const parents = await prisma.process.findMany({ where: { numeroSei: { in: soRelacionados } }, select: { numeroSei: true, statusSistema: true } });
+    for (const p of parents) parentStatusMap.set(p.numeroSei, p.statusSistema);
+  }
+
+  let paiFinalizado = false;
+  const allProcs = await prisma.process.findMany({
+    where: { id: { not: proc.id }, statusSistema: "finalizado" },
+    select: { procedimentosAnexados: true },
+  });
+  for (const other of allProcs) {
+    try {
+      const anexados = JSON.parse(other.procedimentosAnexados || "[]");
+      if (anexados.some((a: any) => a.numero === proc.numeroSei)) {
+        paiFinalizado = true;
+        break;
+      }
+    } catch { /* ignore */ }
+  }
+
+  const concluido = isProcessoConcluido(
+    unidadesReais,
+    ultimoAndSync || (seiData.UltimoAndamento ? { descricao: seiData.UltimoAndamento.Descricao } : null),
+    (seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+    (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+    parentStatusMap,
+  );
+
+  let autoImportados = 0;
+  if (autoImport) {
+    const resultado = await importarProcessosRelacionados(seiData, autoImport.userRole, autoImport.userUnitSiglas, autoImport.todasUnidades);
+    autoImportados = resultado.importados;
+  }
+
+  if (!andamentoMudou && !paiFinalizado && andamentosSync.length === 0 && concluido === (proc.statusSistema === "finalizado")) {
+    return { status: "skipped", mensagem: "Sem alterações.", autoImportados };
+  }
+
+  await prisma.process.update({
+    where: { id: proc.id },
+    data: {
+      tipo: seiData.TipoProcedimento?.Nome || proc.tipo,
+      especificacao: seiData.Especificacao || proc.especificacao,
+      nivelAcesso: seiData.NivelAcesso || proc.nivelAcesso,
+      linkSei: seiData.LinkAcesso || proc.linkSei,
+      statusSistema: (concluido || paiFinalizado) ? "finalizado" : proc.statusSistema === "finalizado" ? "finalizado" : "em_andamento",
+      assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
+      interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
+      unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({ id: seiData.UnidadeAtual.IdUnidade, sigla: seiData.UnidadeAtual.Sigla, descricao: seiData.UnidadeAtual.Descricao }) : proc.unidadeAtual,
+      unidades: JSON.stringify(unidadesReais),
+      andamentos: andamentosSync.length > 0
+        ? JSON.stringify(andamentosSync.map((a) => ({ id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora, usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "" })))
+        : proc.andamentos,
+      unidadeSincronizacao: unidadesComDados.length > 0 ? JSON.stringify(unidadesComDados.map((id) => ({ id }))) : proc.unidadeSincronizacao,
+      procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: p.TipoProcedimento?.Nome || "" }))),
+      procedimentosAnexados: JSON.stringify((seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: p.TipoProcedimento?.Nome || "" }))),
+      ultimoAndamento: seiData.UltimoAndamento ? JSON.stringify({ descricao: seiData.UltimoAndamento.Descricao, dataHora: seiData.UltimoAndamento.DataHora, usuario: seiData.UltimoAndamento.Usuario?.Nome || "", unidade: seiData.UltimoAndamento.Unidade?.Sigla || "" }) : proc.ultimoAndamento,
+      sincronizadoEm: new Date(),
+    },
+  });
+
+  return { status: "success", mensagem: "Sincronizado.", autoImportados };
+}
+
+const MAX_AUTO_IMPORT = 10;
+
+interface AutoImportResult {
+  importados: number;
+  numeros: string[];
+}
+
+async function importarProcessosRelacionados(
+  seiData: any,
+  userRole: string,
+  userUnitSiglas: string[],
+  todasUnidades: any[],
+): Promise<AutoImportResult> {
+  const relacionados = [
+    ...(seiData.ProcedimentosRelacionados || []),
+    ...(seiData.ProcedimentosAnexados || []),
+  ];
+
+  const numeros = relacionados
+    .map((p: any) => p.ProcedimentoFormatado)
+    .filter((n: string) => n && n.length > 0);
+
+  const uniqueNumeros = [...new Set(numeros)];
+
+  if (uniqueNumeros.length === 0) return { importados: 0, numeros: [] };
+
+  const existentes = await prisma.process.findMany({
+    where: { numeroSei: { in: uniqueNumeros } },
+    select: { numeroSei: true },
+  });
+  const existentesSet = new Set(existentes.map((p) => p.numeroSei));
+
+  const paraImportar = uniqueNumeros
+    .filter((n) => !existentesSet.has(n))
+    .slice(0, MAX_AUTO_IMPORT);
+
+  if (paraImportar.length === 0) return { importados: 0, numeros: [] };
+
+  let importados = 0;
+  const importadosNumeros: string[] = [];
+
+  for (const num of paraImportar) {
+    try {
+      const dados = await consultarProcedimento(num);
+
+      const unidadesAbertas = (dados.UnidadesProcedimentoAberto || []).map((u: any) => ({
+        id: u.Unidade.IdUnidade,
+        sigla: u.Unidade.Sigla,
+        descricao: u.Unidade.Descricao,
+      }));
+
+      if (userRole !== "admin") {
+        const hasAccess = unidadesAbertas.some((u: any) => userUnitSiglas.includes(u.sigla));
+        if (!hasAccess) continue;
+      }
+
+      const unidadesParaBuscar = unidadesAbertas.length > 0
+        ? unidadesAbertas.map((u: any) => ({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao }))
+        : montarUnidadesParaBusca(null, [], todasUnidades);
+
+      let andamentosData: any[] = [];
+      try { andamentosData = await listarAndamentos(num, unidadesParaBuscar); } catch { /* ignore */ }
+
+      const parentStatusMap = new Map<string, string>();
+      const relatedNumeros = (dados.ProcedimentosRelacionados || []).map((p: any) => p.ProcedimentoFormatado);
+      const anexadosNumerosLocal = (dados.ProcedimentosAnexados || []).map((p: any) => p.ProcedimentoFormatado);
+      const soRelacionados = relatedNumeros.filter((n: string) => !anexadosNumerosLocal.includes(n));
+      if (soRelacionados.length > 0) {
+        const parents = await prisma.process.findMany({ where: { numeroSei: { in: soRelacionados } }, select: { numeroSei: true, statusSistema: true } });
+        for (const p of parents) parentStatusMap.set(p.numeroSei, p.statusSistema);
+      }
+
+      const concluido = isProcessoConcluido(
+        unidadesAbertas,
+        dados.UltimoAndamento ? { descricao: dados.UltimoAndamento.Descricao } : null,
+        (dados.ProcedimentosRelacionados || []).map((p: any) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+        (dados.ProcedimentosAnexados || []).map((p: any) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+        parentStatusMap,
+      );
+
+      let paiFinalizado = false;
+      const finalizedProcs = await prisma.process.findMany({
+        where: { statusSistema: "finalizado" },
+        select: { procedimentosAnexados: true },
+      });
+      for (const other of finalizedProcs) {
+        try {
+          const anexados = JSON.parse(other.procedimentosAnexados || "[]");
+          if (anexados.some((a: any) => a.numero === num)) {
+            paiFinalizado = true;
+            break;
+          }
+        } catch { /* ignore */ }
+      }
+
+      await prisma.process.create({
+        data: {
+          numeroSei: num,
+          tipo: dados.TipoProcedimento?.Nome || null,
+          especificacao: dados.Especificacao || null,
+          statusSistema: (concluido || paiFinalizado) ? "finalizado" : "em_andamento",
+          dataAutuacao: dados.DataAutuacao || null,
+          nivelAcesso: dados.NivelAcesso || null,
+          linkSei: dados.LinkAcesso || null,
+          assuntos: JSON.stringify(dados.Assuntos?.map((a: any) => a.Descricao) || []),
+          interessados: JSON.stringify(dados.Interessados?.map((i: any) => i.Nome) || []),
+          unidadeAtual: dados.UnidadeAtual ? JSON.stringify({
+            id: dados.UnidadeAtual.IdUnidade,
+            sigla: dados.UnidadeAtual.Sigla,
+            descricao: dados.UnidadeAtual.Descricao,
+          }) : null,
+          unidades: JSON.stringify(unidadesAbertas),
+          andamentos: JSON.stringify(andamentosData.map((a: any) => ({
+            id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora,
+            usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "",
+          }))),
+          procedimentosRelacionados: JSON.stringify((dados.ProcedimentosRelacionados || []).map((p: any) => ({
+            id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: p.TipoProcedimento?.Nome || "",
+          }))),
+          procedimentosAnexados: JSON.stringify((dados.ProcedimentosAnexados || []).map((p: any) => ({
+            id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: p.TipoProcedimento?.Nome || "",
+          }))),
+          ultimoAndamento: dados.UltimoAndamento ? JSON.stringify({
+            descricao: dados.UltimoAndamento.Descricao, dataHora: dados.UltimoAndamento.DataHora,
+            usuario: dados.UltimoAndamento.Usuario?.Nome || "", unidade: dados.UltimoAndamento.Unidade?.Sigla || "",
+          }) : null,
+          sincronizadoEm: new Date(),
+        },
+      });
+
+      importados++;
+      importadosNumeros.push(num);
+    } catch { /* ignore individual failures */ }
+  }
+
+  return { importados, numeros: importadosNumeros };
+}
+
 // List processes with pagination, search, and filters
 router.get("/", async (req: Request, res: Response) => {
   try {
@@ -84,6 +392,12 @@ router.get("/", async (req: Request, res: Response) => {
       where.AND = [{ resumoIa: { not: null } }, { resumoIa: { not: "" } }];
     } else if (resumo === "0") {
       where.resumoIa = null;
+    }
+
+    const andamentos = req.query.andamentos as string | undefined;
+    if (andamentos === "0") {
+      // andamentos é String não-nullable no schema, então NULL nunca existe no banco
+      where.andamentos = "[]";
     }
 
     if (tipo && tipo !== "all") {
@@ -145,18 +459,35 @@ router.get("/", async (req: Request, res: Response) => {
       prisma.process.count({ where }),
     ]);
 
-    const formatted = processes.map((p) => ({
-      ...p,
-      assuntos: JSON.parse(p.assuntos || "[]"),
-      interessados: JSON.parse(p.interessados || "[]"),
-      unidadeAtual: p.unidadeAtual ? JSON.parse(p.unidadeAtual) : null,
-      unidades: JSON.parse(p.unidades || "[]"),
-      andamentos: JSON.parse(p.andamentos || "[]"),
-      procedimentosRelacionados: JSON.parse(p.procedimentosRelacionados || "[]"),
-      procedimentosAnexados: JSON.parse(p.procedimentosAnexados || "[]"),
-      ultimoAndamento: p.ultimoAndamento ? JSON.parse(p.ultimoAndamento) : null,
-      tags: p.tags.map((pt) => pt.tag),
-    }));
+    const formatted = processes.map((p) => {
+      const full = {
+        ...p,
+        assuntos: JSON.parse(p.assuntos || "[]"),
+        interessados: JSON.parse(p.interessados || "[]"),
+        unidadeAtual: p.unidadeAtual ? JSON.parse(p.unidadeAtual) : null,
+        unidades: JSON.parse(p.unidades || "[]"),
+        andamentos: JSON.parse(p.andamentos || "[]"),
+        procedimentosRelacionados: JSON.parse(p.procedimentosRelacionados || "[]"),
+        procedimentosAnexados: JSON.parse(p.procedimentosAnexados || "[]"),
+        ultimoAndamento: p.ultimoAndamento ? JSON.parse(p.ultimoAndamento) : null,
+        tags: p.tags.map((pt) => pt.tag),
+      };
+      if (userRole === "analista" && p.nivelAcesso?.includes("Restrito")) {
+        const isInUserUnits = siglasDoProcesso(p).some((s) => userUnitSiglas.includes(s));
+        if (!isInUserUnits) {
+          return {
+            id: p.id,
+            numeroSei: p.numeroSei,
+            nivelAcesso: p.nivelAcesso,
+            statusSistema: p.statusSistema,
+            unidades: full.unidades,
+            unidadeAtual: full.unidadeAtual,
+            acessoRestrito: true,
+          };
+        }
+      }
+      return full;
+    });
 
     res.json({
       processes: formatted,
@@ -252,6 +583,12 @@ router.get("/:id/andamentos", async (req: Request, res: Response) => {
       return;
     }
 
+    const { acesso } = await permissaoDeAcesso(req.user!.userId, process);
+    if (!acesso.permitido) {
+      res.status(403).json({ error: acesso.motivo || "Acesso negado." });
+      return;
+    }
+
     let unidades;
     try {
       unidades = await listarUnidades();
@@ -279,6 +616,12 @@ router.get("/:id/pais", async (req: Request, res: Response) => {
     const process = await prisma.process.findUnique({ where: { id: req.params.id } });
     if (!process) {
       res.status(404).json({ error: "Processo não encontrado." });
+      return;
+    }
+
+    const { acesso } = await permissaoDeAcesso(req.user!.userId, process);
+    if (!acesso.permitido) {
+      res.status(403).json({ error: acesso.motivo || "Acesso negado." });
       return;
     }
 
@@ -360,14 +703,25 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     // Detecta se processo está concluído
+    const relatedNumeros = (seiData.ProcedimentosRelacionados || []).map((p) => p.ProcedimentoFormatado);
+    const anexadosNumeros = (seiData.ProcedimentosAnexados || []).map((p) => p.ProcedimentoFormatado);
+    const soRelacionados = relatedNumeros.filter((n) => !anexadosNumeros.includes(n));
+
+    const parentStatusMap = new Map<string, string>();
+    if (soRelacionados.length > 0) {
+      const parents = await prisma.process.findMany({ where: { numeroSei: { in: soRelacionados } }, select: { numeroSei: true, statusSistema: true } });
+      for (const p of parents) parentStatusMap.set(p.numeroSei, p.statusSistema);
+    }
+
     const concluido = isProcessoConcluido(
       unidades,
       seiData.UltimoAndamento ? { descricao: seiData.UltimoAndamento.Descricao } : null,
       (seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
       (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
+      parentStatusMap,
     );
 
-    // Otimização: herança - busca apenas processos finalizados
+    // Herança reversa: processos finalizados que anexaram este processo
     let paiFinalizado = false;
     if (!concluido) {
       const finalizedProcs = await prisma.process.findMany({
@@ -439,7 +793,11 @@ router.post("/", async (req: Request, res: Response) => {
       },
     });
 
-    res.status(201).json(processo);
+    let todasUnidades: any[] = [];
+    try { todasUnidades = await listarUnidades(); } catch { /* ignore */ }
+    const autoResult = await importarProcessosRelacionados(seiData, userRole, userUnitSiglas, todasUnidades);
+
+    res.status(201).json({ ...processo, autoImportados: autoResult.importados });
   } catch (error) {
     console.error("[PROCESSES] Create error:", error);
     res.status(500).json({ error: "Erro ao cadastrar processo." });
@@ -596,6 +954,31 @@ router.post("/import", async (req: Request, res: Response) => {
       results.push(...resultadosLote);
     }
 
+    // Importação automática de processos relacionados
+    const numerosImportados = results
+      .filter((r) => r.status === "success" && r.processId)
+      .map((r) => r.numero);
+
+    let autoImportados = 0;
+    const autoImportNumeros: string[] = [];
+
+    if (numerosImportados.length > 0) {
+      const existentes = await prisma.process.findMany({
+        where: { numeroSei: { in: numerosImportados } },
+        select: { numeroSei: true, procedimentosRelacionados: true, procedimentosAnexados: true },
+      });
+
+      for (const proc of existentes) {
+        const seiData = {
+          ProcedimentosRelacionados: JSON.parse(proc.procedimentosRelacionados || "[]").map((p: any) => ({ ProcedimentoFormatado: p.numero })),
+          ProcedimentosAnexados: JSON.parse(proc.procedimentosAnexados || "[]").map((p: any) => ({ ProcedimentoFormatado: p.numero })),
+        };
+        const resultado = await importarProcessosRelacionados(seiData, userRole, userUnitSiglas, todasUnidadesGlobal);
+        autoImportados += resultado.importados;
+        autoImportNumeros.push(...resultado.numeros);
+      }
+    }
+
     const successes = results.filter((r) => r.status === "success").length;
     const errors = results.filter((r) => r.status === "error").length;
 
@@ -607,7 +990,7 @@ router.post("/import", async (req: Request, res: Response) => {
       },
     });
 
-    res.json({ results, summary: { total: numeros.length, successes, errors } });
+    res.json({ results, summary: { total: numeros.length, successes, errors, autoImportados, autoImportNumeros } });
   } catch (error) {
     console.error("[PROCESSES] Import error:", error);
     res.status(500).json({ error: "Erro na importação em lote." });
@@ -623,151 +1006,40 @@ router.post("/sync-batch", async (req: Request, res: Response) => {
       return;
     }
 
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    const userRole = user?.role || "assistente";
+    const isAdmin = userRole === "admin";
+    const userUnits = await prisma.userUnit.findMany({ where: { userId: req.user!.userId } });
+    const userUnitSiglas = userUnits.map((u) => u.unitSigla);
+
+    let todasUnidades: any[] = [];
+    try { todasUnidades = await listarUnidades(); } catch { /* ignore */ }
+
     const CONCURRENCY = 5;
-    const results: { id: string; status: string; mensagem: string }[] = [];
-
-    const syncOne = async (id: string) => {
-      try {
-        const proc = await prisma.process.findUnique({ where: { id } });
-        if (!proc) return { id, status: "error", mensagem: "Processo não encontrado." };
-
-        // Pula processos finalizados (raramente voltam a ser abertos)
-        if (proc.statusSistema === "finalizado") {
-          return { id, status: "skipped", mensagem: "Processo já finalizado." };
-        }
-
-        // Extrai unidadeAtualId do processo salvo no banco
-        let unidadeAtualId: string | undefined;
-        try {
-          const ua = proc.unidadeAtual ? JSON.parse(proc.unidadeAtual) : null;
-          unidadeAtualId = ua?.id;
-        } catch { /* ignore */ }
-
-        const seiData = await consultarProcedimento(proc.numeroSei, unidadeAtualId);
-        const unidadesAbertas = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
-          id: u.Unidade.IdUnidade,
-          sigla: u.Unidade.Sigla,
-          descricao: u.Unidade.Descricao,
-        }));
-        const unidadesReais = [...unidadesAbertas];
-
-        // Compara UltimoAndamento com o salvo no banco
-        const ultimoAndamentoNovo = seiData.UltimoAndamento?.Descricao || null;
-        const ultimoAndamentoAntigo = proc.ultimoAndamento
-          ? JSON.parse(proc.ultimoAndamento).descricao
-          : null;
-        const andamentoMudou = ultimoAndamentoNovo !== ultimoAndamentoAntigo;
-        const andamentosVazios = !proc.andamentos || JSON.parse(proc.andamentos || "[]").length === 0;
-
-        let andamentosSync: any[] = [];
-        let unidadesComDados: string[] = [];
-
-        if (andamentoMudou || andamentosVazios) {
-          // Busca andamentos se mudou ou se estavam vazios (importação inicial sem unidades abertas)
-          let todasUnidades: any[] = [];
-          try { todasUnidades = await listarUnidades(); } catch { /* ignore */ }
-          const unidadesParaBuscar = montarUnidadesParaBusca(proc.unidadeSincronizacao, unidadesAbertas, todasUnidades);
-
-          if (unidadesParaBuscar.length > 0) {
-            try {
-              andamentosSync = await listarAndamentos(proc.numeroSei, unidadesParaBuscar);
-              if (andamentosSync.length > 0) {
-                unidadesComDados = Array.from(new Set(andamentosSync.map((a: any) => a.Unidade?.IdUnidade).filter(Boolean)));
-              }
-            } catch { /* ignore */ }
-          }
-        }
-
-        const andamentosSyncParsed = andamentosSync.map((a) => ({
-          id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora,
-          usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "",
-        }));
-        const ultimoAndSync = andamentosSyncParsed.length > 0 ? andamentosSyncParsed[0] : null;
-
-        // Só verifica herança se tem procedimentosRelacionados
-        let paiFinalizado = false;
-        const relatedNumeros = (seiData.ProcedimentosRelacionados || []).map((p) => p.ProcedimentoFormatado);
-        const anexadosNumeros = (seiData.ProcedimentosAnexados || []).map((p) => p.ProcedimentoFormatado);
-        const soRelacionados = relatedNumeros.filter((n) => !anexadosNumeros.includes(n));
-
-        const parentStatusMap = new Map<string, string>();
-        if (soRelacionados.length > 0) {
-          const parents = await prisma.process.findMany({ where: { numeroSei: { in: soRelacionados } }, select: { numeroSei: true, statusSistema: true } });
-          for (const p of parents) parentStatusMap.set(p.numeroSei, p.statusSistema);
-
-          // Verifica se todos os pais são finalizados
-          const todosPaisFinalizados = soRelacionados.every((n) => parentStatusMap.get(n) === "finalizado");
-          if (todosPaisFinalizados) {
-            paiFinalizado = true;
-          }
-
-          // Se nenhum pai está finalizado, verifica herança (processo pai que anexa este)
-          if (!paiFinalizado) {
-            const allProcs = await prisma.process.findMany({
-              where: { id: { not: proc.id }, statusSistema: "finalizado" },
-              select: { procedimentosAnexados: true },
-            });
-            for (const other of allProcs) {
-              try {
-                const anexados = JSON.parse(other.procedimentosAnexados || "[]");
-                if (anexados.some((a: any) => a.numero === proc.numeroSei)) {
-                  paiFinalizado = true;
-                  break;
-                }
-              } catch { /* ignore */ }
-            }
-          }
-        }
-
-        const concluido = isProcessoConcluido(
-          unidadesReais,
-          ultimoAndSync || (seiData.UltimoAndamento ? { descricao: seiData.UltimoAndamento.Descricao } : null),
-          (seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
-          (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
-          parentStatusMap,
-        );
-
-        // Se nada mudou e não há herança de status, pula update
-        if (!andamentoMudou && !paiFinalizado && concluido === (proc.statusSistema === "finalizado")) {
-          return { id: proc.id, status: "skipped", mensagem: "Sem alterações." };
-        }
-
-        await prisma.process.update({
-          where: { id: proc.id },
-          data: {
-            tipo: seiData.TipoProcedimento?.Nome || proc.tipo,
-            especificacao: seiData.Especificacao || proc.especificacao,
-            nivelAcesso: seiData.NivelAcesso || proc.nivelAcesso,
-            linkSei: seiData.LinkAcesso || proc.linkSei,
-            statusSistema: (concluido || paiFinalizado) ? "finalizado" : proc.statusSistema === "finalizado" ? "finalizado" : "em_andamento",
-            assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
-            interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
-            unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({ id: seiData.UnidadeAtual.IdUnidade, sigla: seiData.UnidadeAtual.Sigla, descricao: seiData.UnidadeAtual.Descricao }) : proc.unidadeAtual,
-            unidades: JSON.stringify(unidadesReais),
-            andamentos: andamentosSync.length > 0
-              ? JSON.stringify(andamentosSync.map((a) => ({ id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora, usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "" })))
-              : proc.andamentos,
-            unidadeSincronizacao: unidadesComDados.length > 0 ? JSON.stringify(unidadesComDados.map((id) => ({ id }))) : proc.unidadeSincronizacao,
-            procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: p.TipoProcedimento?.Nome || "" }))),
-            procedimentosAnexados: JSON.stringify((seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: p.TipoProcedimento?.Nome || "" }))),
-            ultimoAndamento: seiData.UltimoAndamento ? JSON.stringify({ descricao: seiData.UltimoAndamento.Descricao, dataHora: seiData.UltimoAndamento.DataHora, usuario: seiData.UltimoAndamento.Usuario?.Nome || "", unidade: seiData.UltimoAndamento.Unidade?.Sigla || "" }) : proc.ultimoAndamento,
-            sincronizadoEm: new Date(),
-          },
-        });
-
-        return { id: proc.id, status: "success", mensagem: "Sincronizado." };
-      } catch (err: any) {
-        return { id, status: "error", mensagem: err.message };
-      }
-    };
+    const results: { id: string; status: string; mensagem: string; autoImportados?: number }[] = [];
 
     for (let i = 0; i < ids.length; i += CONCURRENCY) {
       const lote = ids.slice(i, i + CONCURRENCY);
-      const resultadosLote = await Promise.all(lote.map(syncOne));
+      const resultadosLote = await Promise.all(lote.map(async (id: string) => {
+        const proc = await prisma.process.findUnique({ where: { id } });
+        if (!proc) return { id, status: "error", mensagem: "Processo não encontrado." };
+        if (proc.statusSistema === "finalizado" && !isAdmin) {
+          return { id, status: "skipped", mensagem: "Processo já finalizado." };
+        }
+        if (!isAdmin) {
+          const acesso = verificarAcessoProcesso(proc, userRole, userUnitSiglas);
+          if (!acesso.permitido) {
+            return { id, status: "skipped", mensagem: acesso.motivo || "Acesso negado." };
+          }
+        }
+        const result = await syncProcesso(id, { userRole, userUnitSiglas, todasUnidades });
+        return { id, ...result };
+      }));
       results.push(...resultadosLote);
     }
 
-    res.json({ results, total: ids.length });
+    const totalAutoImportados = results.reduce((acc, r) => acc + (r.autoImportados || 0), 0);
+    res.json({ results, total: ids.length, autoImportados: totalAutoImportados });
   } catch (error) {
     console.error("[PROCESSES] Batch sync error:", error);
     res.status(500).json({ error: "Erro na sincronização em lote." });
@@ -783,163 +1055,23 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
       return;
     }
 
-    let seiData;
-    try {
-      // Extrai unidadeAtualId do processo salvo no banco
-      let unidadeAtualId: string | undefined;
-      try {
-        const ua = process.unidadeAtual ? JSON.parse(process.unidadeAtual) : null;
-        unidadeAtualId = ua?.id;
-      } catch { /* ignore */ }
-
-      seiData = await consultarProcedimento(process.numeroSei, unidadeAtualId);
-    } catch (err: any) {
-      await prisma.syncLog.create({
-        data: {
-          processId: process.id,
-          numeroSei: process.numeroSei,
-          tipo: "manual",
-          status: "error",
-          mensagem: `Erro ao sincronizar: ${err.message}`,
-        },
-      });
-      res.status(422).json({ error: `Erro ao consultar SEI: ${err.message}` });
+    const { userRole, userUnitSiglas, acesso } = await permissaoDeAcesso(req.user!.userId, process);
+    if (!acesso.permitido) {
+      res.status(403).json({ error: acesso.motivo || "Acesso negado." });
+      return;
+    }
+    if (process.statusSistema === "finalizado" && userRole !== "admin") {
+      res.status(403).json({ error: "Somente administradores podem sincronizar processos finalizados." });
       return;
     }
 
-    const unidadesAbertas = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
-      id: u.Unidade.IdUnidade,
-      sigla: u.Unidade.Sigla,
-      descricao: u.Unidade.Descricao,
-    }));
+    let todasUnidades: any[] = [];
+    try { todasUnidades = await listarUnidades(); } catch { /* ignore */ }
 
-    // Unidades reais = apenas as abertas no SEI (para salvar no banco)
-    const unidadesReais = [...unidadesAbertas];
-
-    // Compara UltimoAndamento com o salvo no banco
-    const ultimoAndamentoNovo = seiData.UltimoAndamento?.Descricao || null;
-    const ultimoAndamentoAntigo = process.ultimoAndamento
-      ? JSON.parse(process.ultimoAndamento).descricao
-      : null;
-    const andamentoMudou = ultimoAndamentoNovo !== ultimoAndamentoAntigo;
-    const andamentosVazios = !process.andamentos || JSON.parse(process.andamentos || "[]").length === 0;
-
-    let andamentosSync: any[] = [];
-    let unidadesComDados: string[] = [];
-
-    if (andamentoMudou || andamentosVazios) {
-      // Busca andamentos se mudou ou se estavam vazios (importação inicial sem unidades abertas)
-      let todasUnidades: any[] = [];
-      try {
-        todasUnidades = await listarUnidades();
-      } catch { /* ignore */ }
-      const unidadesParaBuscar = montarUnidadesParaBusca(
-        process.unidadeSincronizacao,
-        unidadesAbertas,
-        todasUnidades,
-      );
-
-      if (unidadesParaBuscar.length > 0) {
-        try {
-          andamentosSync = await listarAndamentos(process.numeroSei, unidadesParaBuscar);
-          if (andamentosSync.length > 0) {
-            const unidadesComAndamentos = new Set(andamentosSync.map((a: any) => a.Unidade?.IdUnidade).filter(Boolean));
-            unidadesComDados = Array.from(unidadesComAndamentos);
-          }
-        } catch (err: any) {
-          console.warn(`[SYNC] ${process.numeroSei}: falha ao listar andamentos: ${err.message}`);
-        }
-      }
-    }
-
-    // Detecta se processo está concluído
-    const andamentosSyncParsed = andamentosSync.map((a) => ({
-      id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora,
-      usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "",
-    }));
-    const ultimoAndSync = andamentosSyncParsed.length > 0 ? andamentosSyncParsed[0] : null;
-
-    // Busca status dos processos pai no banco (só se tem procedimentosRelacionados)
-    const anexadosNumeros = (seiData.ProcedimentosAnexados || []).map((p) => p.ProcedimentoFormatado);
-    const relatedNumeros = (seiData.ProcedimentosRelacionados || [])
-      .map((p) => p.ProcedimentoFormatado)
-      .filter((num) => !anexadosNumeros.includes(num));
-
-    const parentStatusMap = new Map<string, string>();
-    if (relatedNumeros.length > 0) {
-      const parents = await prisma.process.findMany({
-        where: { numeroSei: { in: relatedNumeros } },
-        select: { numeroSei: true, statusSistema: true },
-      });
-      for (const p of parents) {
-        parentStatusMap.set(p.numeroSei, p.statusSistema);
-      }
-    }
-
-    const concluido = isProcessoConcluido(
-      unidadesReais,
-      ultimoAndSync || (seiData.UltimoAndamento ? { descricao: seiData.UltimoAndamento.Descricao } : null),
-      (seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
-      (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
-      parentStatusMap,
-    );
-
-    // Herança de status: se algum processo pai (que anexou este) está finalizado, este também fica
-    let paiFinalizado = false;
-    if (!concluido && relatedNumeros.length > 0) {
-      const allProcs = await prisma.process.findMany({
-        where: { id: { not: process.id }, statusSistema: "finalizado" },
-        select: { procedimentosAnexados: true },
-      });
-      for (const other of allProcs) {
-        try {
-          const anexados = JSON.parse(other.procedimentosAnexados || "[]");
-          if (anexados.some((a: any) => a.numero === process.numeroSei)) {
-            paiFinalizado = true;
-            break;
-          }
-        } catch { /* ignore */ }
-      }
-    }
-
-    const updated = await prisma.process.update({
-      where: { id: process.id },
-      data: {
-        tipo: seiData.TipoProcedimento?.Nome || process.tipo,
-        especificacao: seiData.Especificacao || process.especificacao,
-        nivelAcesso: seiData.NivelAcesso || process.nivelAcesso,
-        linkSei: seiData.LinkAcesso || process.linkSei,
-        statusSistema: (concluido || paiFinalizado) ? "finalizado" : process.statusSistema === "finalizado" ? "finalizado" : "em_andamento",
-        assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
-        interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
-        unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({
-          id: seiData.UnidadeAtual.IdUnidade,
-          sigla: seiData.UnidadeAtual.Sigla,
-          descricao: seiData.UnidadeAtual.Descricao,
-        }) : process.unidadeAtual,
-        unidades: JSON.stringify(unidadesReais),
-        andamentos: andamentosSync.length > 0
-          ? JSON.stringify(andamentosSync.map((a) => ({ id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora, usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "" })))
-          : process.andamentos,
-        unidadeSincronizacao: unidadesComDados.length > 0 ? JSON.stringify(unidadesComDados.map((id) => ({ id }))) : process.unidadeSincronizacao,
-        procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
-          id: p.IdProcedimento,
-          numero: p.ProcedimentoFormatado,
-          tipo: p.TipoProcedimento?.Nome || "",
-        }))),
-        procedimentosAnexados: JSON.stringify((seiData.ProcedimentosAnexados || []).map((p) => ({
-          id: p.IdProcedimento,
-          numero: p.ProcedimentoFormatado,
-          tipo: p.TipoProcedimento?.Nome || "",
-        }))),
-        ultimoAndamento: seiData.UltimoAndamento ? JSON.stringify({
-          descricao: seiData.UltimoAndamento.Descricao,
-          dataHora: seiData.UltimoAndamento.DataHora,
-          usuario: seiData.UltimoAndamento.Usuario?.Nome || "",
-          unidade: seiData.UltimoAndamento.Unidade?.Sigla || "",
-        }) : process.ultimoAndamento,
-        sincronizadoEm: new Date(),
-      },
+    const result = await syncProcesso(req.params.id, {
+      userRole,
+      userUnitSiglas,
+      todasUnidades,
     });
 
     await prisma.syncLog.create({
@@ -947,10 +1079,17 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
         processId: process.id,
         numeroSei: process.numeroSei,
         tipo: "manual",
-        status: "success",
-        mensagem: "Sincronização manual concluída. 1 processo atualizado.",
+        status: result.status === "error" ? "error" : "success",
+        mensagem: result.status === "error"
+          ? `Erro ao sincronizar: ${result.mensagem}`
+          : `Sincronização manual concluída. 1 processo ${result.status === "skipped" ? "sem alterações" : "atualizado"}.`,
       },
     });
+
+    if (result.status === "error") {
+      res.status(422).json({ error: result.mensagem });
+      return;
+    }
 
     const full = await prisma.process.findUnique({
       where: { id: process.id },
@@ -968,6 +1107,7 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
       procedimentosAnexados: JSON.parse(full!.procedimentosAnexados || "[]"),
       ultimoAndamento: full!.ultimoAndamento ? JSON.parse(full!.ultimoAndamento) : null,
       tags: full!.tags.map((pt) => pt.tag),
+      autoImportados: result.autoImportados || 0,
     });
   } catch (error) {
     console.error("[PROCESSES] Sync error:", error);
@@ -983,6 +1123,12 @@ router.put("/:id", async (req: Request, res: Response) => {
     const process = await prisma.process.findUnique({ where: { id: req.params.id } });
     if (!process) {
       res.status(404).json({ error: "Processo não encontrado." });
+      return;
+    }
+
+    const { acesso } = await permissaoDeAcesso(req.user!.userId, process);
+    if (!acesso.permitido) {
+      res.status(403).json({ error: acesso.motivo || "Acesso negado." });
       return;
     }
 
@@ -1057,6 +1203,12 @@ router.post("/:id/resumo/save", async (req: Request, res: Response) => {
       return;
     }
 
+    const { acesso } = await permissaoDeAcesso(req.user!.userId, process);
+    if (!acesso.permitido) {
+      res.status(403).json({ error: acesso.motivo || "Acesso negado." });
+      return;
+    }
+
     const { resumo } = req.body;
     if (!resumo || typeof resumo !== "string" || !resumo.trim()) {
       res.status(400).json({ error: "Resumo não fornecido." });
@@ -1087,6 +1239,12 @@ router.post("/:id/resumo", upload.array("files", 20), async (req: Request, res: 
     const process = await prisma.process.findUnique({ where: { id: req.params.id } });
     if (!process) {
       res.status(404).json({ error: "Processo não encontrado." });
+      return;
+    }
+
+    const { acesso } = await permissaoDeAcesso(req.user!.userId, process);
+    if (!acesso.permitido) {
+      res.status(403).json({ error: acesso.motivo || "Acesso negado." });
       return;
     }
 
@@ -1144,7 +1302,7 @@ router.get("/:id/resumo", async (req: Request, res: Response) => {
   try {
     const process = await prisma.process.findUnique({
       where: { id: req.params.id },
-      select: { resumoIa: true, resumoGeradoEm: true },
+      select: { resumoIa: true, resumoGeradoEm: true, nivelAcesso: true, unidades: true, unidadeAtual: true },
     });
 
     if (!process) {
@@ -1152,7 +1310,13 @@ router.get("/:id/resumo", async (req: Request, res: Response) => {
       return;
     }
 
-    res.json(process);
+    const { acesso } = await permissaoDeAcesso(req.user!.userId, process);
+    if (!acesso.permitido) {
+      res.status(403).json({ error: acesso.motivo || "Acesso negado." });
+      return;
+    }
+
+    res.json({ resumoIa: process.resumoIa, resumoGeradoEm: process.resumoGeradoEm });
   } catch (error) {
     console.error("[RESUMO] Get error:", error);
     res.status(500).json({ error: "Erro ao buscar resumo." });
@@ -1176,6 +1340,12 @@ router.post("/:id/annotations", async (req: Request, res: Response) => {
       return;
     }
 
+    const { acesso } = await permissaoDeAcesso(req.user!.userId, process);
+    if (!acesso.permitido) {
+      res.status(403).json({ error: acesso.motivo || "Acesso negado." });
+      return;
+    }
+
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
 
     const annotation = await prisma.annotation.create({
@@ -1196,6 +1366,18 @@ router.post("/:id/annotations", async (req: Request, res: Response) => {
 
 router.get("/:id/annotations", async (req: Request, res: Response) => {
   try {
+    const process = await prisma.process.findUnique({ where: { id: req.params.id } });
+    if (!process) {
+      res.status(404).json({ error: "Processo não encontrado." });
+      return;
+    }
+
+    const { acesso } = await permissaoDeAcesso(req.user!.userId, process);
+    if (!acesso.permitido) {
+      res.status(403).json({ error: acesso.motivo || "Acesso negado." });
+      return;
+    }
+
     const annotations = await prisma.annotation.findMany({
       where: { processId: req.params.id },
       orderBy: { createdAt: "desc" },

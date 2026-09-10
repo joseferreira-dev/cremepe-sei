@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listProcesses, deleteProcess, listUnidades, type SeiUnidade } from '../api';
-import type { Process, ProcessStatus, User } from '../types';
+import { listProcesses, deleteProcess, listUnidades, listTags, syncBatch, updateProcess, type SeiUnidade } from '../api';
+import type { Process, ProcessStatus, User, Tag } from '../types';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
 import Pagination from './ui/Pagination';
@@ -28,6 +28,7 @@ export default function ProcessList({ onlyWithoutResumo = false, user }: Props) 
   const [nivelFilter, setNivelFilter] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [semAndamentos, setSemAndamentos] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<string>('createdAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -38,10 +39,14 @@ export default function ProcessList({ onlyWithoutResumo = false, user }: Props) 
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState<SeiUnidade[]>([]);
   const [tipos, setTipos] = useState<string[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [tagToApply, setTagToApply] = useState('');
+  const [batchBusy, setBatchBusy] = useState(false);
   const perPage = 10;
 
   useEffect(() => {
     listUnidades().then(setUnits).catch(() => setUnits([]));
+    listTags().then(setTags).catch(() => setTags([]));
     listProcesses({ limit: 500 }).then((res) => {
       const unique = [...new Set(res.processes.map((p) => p.tipo).filter(Boolean))].sort();
       setTipos(unique);
@@ -58,6 +63,7 @@ export default function ProcessList({ onlyWithoutResumo = false, user }: Props) 
         status: statusFilter,
         unit: unitFilter,
         resumo: onlyWithoutResumo ? '0' : 'all',
+        andamentos: semAndamentos ? '0' : 'all',
         tipo: tipoFilter,
         nivelAcesso: nivelFilter,
         dateFrom: dateFrom || undefined,
@@ -71,7 +77,7 @@ export default function ProcessList({ onlyWithoutResumo = false, user }: Props) 
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, unitFilter, onlyWithoutResumo, tipoFilter, nivelFilter, dateFrom, dateTo]);
+  }, [page, search, statusFilter, unitFilter, onlyWithoutResumo, semAndamentos, tipoFilter, nivelFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     load();
@@ -91,14 +97,66 @@ export default function ProcessList({ onlyWithoutResumo = false, user }: Props) 
   };
 
   const toggleSelect = (id: string) => {
+    const proc = data.find((p) => p.id === id);
+    if (proc?.acessoRestrito) return;
     const next = new Set(selectedIds);
     next.has(id) ? next.delete(id) : next.add(id);
     setSelectedIds(next);
   };
 
+  const selectable = sorted.filter((p) => !p.acessoRestrito);
+
   const toggleSelectAll = () => {
-    if (selectedIds.size === sorted.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(sorted.map((p) => p.id)));
+    if (selectedIds.size === selectable.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(selectable.map((p) => p.id)));
+  };
+
+  const handleSyncSelected = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBatchBusy(true);
+    try {
+      const res = await syncBatch(ids);
+      let ok = 0, semAlteracao = 0, erros = 0;
+      res.results.forEach((r) => {
+        if (r.status === 'error') erros++;
+        else if (r.status === 'skipped') semAlteracao++;
+        else ok++;
+      });
+      let msg = `Sincronizados: ${ok}${semAlteracao ? ` · sem alterações: ${semAlteracao}` : ''}${erros ? ` · erros: ${erros}` : ''}.`;
+      if (res.autoImportados > 0) msg += ` ${res.autoImportados} processo(s) relacionado(s) importado(s).`;
+      dialog.success(msg);
+      load();
+    } catch (e: any) {
+      dialog.error(e?.message || 'Erro ao sincronizar selecionados.');
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  const handleApplyTag = async () => {
+    if (!tagToApply) return;
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBatchBusy(true);
+    try {
+      const alvos = ids.filter((id) => {
+        const proc = data.find((p) => p.id === id);
+        return proc && !proc.acessoRestrito && !proc.tags.find((t) => t.id === tagToApply);
+      });
+      const resultados = await Promise.allSettled(alvos.map((id) => {
+        const proc = data.find((p) => p.id === id) as Process;
+        return updateProcess(id, { tagIds: [...proc.tags.map((t) => t.id), tagToApply] });
+      }));
+      const applied = resultados.filter((r) => r.status === 'fulfilled').length;
+      dialog.success(`Tag aplicada em ${applied} processo(s).`);
+      load();
+    } catch (e: any) {
+      dialog.error(e?.message || 'Erro ao aplicar tag.');
+    } finally {
+      setBatchBusy(false);
+      setTagToApply('');
+    }
   };
 
   const handleDelete = async (p: Process) => {
@@ -216,9 +274,19 @@ export default function ProcessList({ onlyWithoutResumo = false, user }: Props) 
               className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30"
             />
           </div>
-          {(search || statusFilter !== 'all' || unitFilter !== 'all' || tipoFilter !== 'all' || nivelFilter !== 'all' || dateFrom || dateTo) && (
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={semAndamentos}
+              onChange={(e) => { setSemAndamentos(e.target.checked); setPage(1); }}
+              className="rounded"
+              style={{ accentColor: '#009C60' }}
+            />
+            Sem andamentos
+          </label>
+          {(search || statusFilter !== 'all' || unitFilter !== 'all' || tipoFilter !== 'all' || nivelFilter !== 'all' || semAndamentos || dateFrom || dateTo) && (
             <button
-              onClick={() => { setSearch(''); setStatusFilter('all'); setUnitFilter('all'); setTipoFilter('all'); setNivelFilter('all'); setDateFrom(''); setDateTo(''); setPage(1); }}
+              onClick={() => { setSearch(''); setStatusFilter('all'); setUnitFilter('all'); setTipoFilter('all'); setNivelFilter('all'); setDateFrom(''); setDateTo(''); setSemAndamentos(false); setPage(1); }}
               className="text-sm text-gray-500 hover:text-red-500 transition-colors"
             >
               Limpar filtros
@@ -229,15 +297,37 @@ export default function ProcessList({ onlyWithoutResumo = false, user }: Props) 
 
       {/* Batch actions */}
       {selectedIds.size > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
           <span className="text-sm text-blue-700 font-medium">{selectedIds.size} processo(s) selecionado(s)</span>
-          <button className="text-xs px-3 py-1 rounded-md text-white font-medium" style={{ background: '#29ABE2' }}>
-            Sincronizar selecionados
+          <button
+            onClick={handleSyncSelected}
+            disabled={batchBusy}
+            className="text-xs px-3 py-1 rounded-md text-white font-medium disabled:opacity-50"
+            style={{ background: '#29ABE2' }}
+          >
+            {batchBusy ? 'Processando…' : 'Sincronizar selecionados'}
           </button>
-          <button className="text-xs px-3 py-1 rounded-md bg-white border border-blue-200 text-blue-700 font-medium">
-            Aplicar tag
-          </button>
-          <button onClick={() => setSelectedIds(new Set())} className="ml-auto text-blue-400 hover:text-blue-600 text-xs">Deselecionar</button>
+          <div className="flex items-center gap-1.5">
+            <select
+              value={tagToApply}
+              onChange={(e) => setTagToApply(e.target.value)}
+              disabled={batchBusy}
+              className="text-xs px-2 py-1 rounded-md border border-blue-200 bg-white text-blue-700 focus:outline-none"
+            >
+              <option value="">Selecionar tag…</option>
+              {tags.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleApplyTag}
+              disabled={batchBusy || !tagToApply}
+              className="text-xs px-3 py-1 rounded-md bg-white border border-blue-200 text-blue-700 font-medium disabled:opacity-50"
+            >
+              Aplicar
+            </button>
+          </div>
+          <button onClick={() => { setSelectedIds(new Set()); setTagToApply(''); }} className="ml-auto text-blue-400 hover:text-blue-600 text-xs">Deselecionar</button>
         </div>
       )}
 
@@ -250,7 +340,7 @@ export default function ProcessList({ onlyWithoutResumo = false, user }: Props) 
                 <th className="w-10 px-4 py-3">
                   <input
                     type="checkbox"
-                    checked={selectedIds.size === sorted.length && sorted.length > 0}
+                    checked={selectedIds.size === selectable.length && selectable.length > 0}
                     onChange={toggleSelectAll}
                     className="rounded"
                     style={{ accentColor: '#009C60' }}
@@ -292,6 +382,7 @@ export default function ProcessList({ onlyWithoutResumo = false, user }: Props) 
                         type="checkbox"
                         checked={selectedIds.has(p.id)}
                         onChange={() => toggleSelect(p.id)}
+                        disabled={Boolean(p.acessoRestrito)}
                         className="rounded"
                         style={{ accentColor: '#009C60' }}
                       />

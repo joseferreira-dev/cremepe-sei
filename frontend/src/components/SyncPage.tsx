@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listProcesses, syncBatch, syncProcess, listUnidades, type SeiUnidade } from '../api';
-import type { Process } from '../types';
+import type { Process, User } from '../types';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
 import Pagination from './ui/Pagination';
@@ -22,7 +22,7 @@ function tempoDesde(dataIso: string | null): string {
   return partes.join(', ');
 }
 
-export default function SyncPage() {
+export default function SyncPage({ user }: { user: User }) {
   const navigate = useNavigate();
   const dialog = useDialog();
   const [processes, setProcesses] = useState<Process[]>([]);
@@ -44,6 +44,7 @@ export default function SyncPage() {
   const [nivelFilter, setNivelFilter] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [semAndamentos, setSemAndamentos] = useState(false);
   const [units, setUnits] = useState<SeiUnidade[]>([]);
   const [tipos, setTipos] = useState<string[]>([]);
 
@@ -66,6 +67,7 @@ export default function SyncPage() {
         unit: unitFilter,
         tipo: tipoFilter,
         nivelAcesso: nivelFilter,
+        andamentos: semAndamentos ? '0' : 'all',
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
       };
@@ -87,7 +89,7 @@ export default function SyncPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, unitFilter, tipoFilter, nivelFilter, dateFrom, dateTo]);
+  }, [page, search, statusFilter, unitFilter, tipoFilter, nivelFilter, dateFrom, dateTo, semAndamentos]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -101,6 +103,7 @@ export default function SyncPage() {
     setSyncProgress({ done: 0, total });
     let erros = 0;
     let synced = 0;
+    let totalAutoImportados = 0;
     try {
       let pageToFetch = 1;
       let hasMore = true;
@@ -113,6 +116,7 @@ export default function SyncPage() {
           unit: unitFilter,
           tipo: tipoFilter,
           nivelAcesso: nivelFilter,
+          andamentos: semAndamentos ? '0' : 'all',
           dateFrom: dateFrom || undefined,
           dateTo: dateTo || undefined,
         });
@@ -126,16 +130,19 @@ export default function SyncPage() {
           const falhas = result.results.filter((r) => r.status === "error");
           erros += falhas.length;
           synced += result.results.length;
+          totalAutoImportados += result.autoImportados || 0;
           setSyncProgress({ done: synced, total });
         }
         hasMore = sindicaveis.length === 500;
         pageToFetch++;
       }
-      if (erros > 0) {
-        dialog.success(`Sincronização concluída. ${erros} processo(s) falharam.`);
-      } else {
-        dialog.success('Todos os processos filtrados foram sincronizados com sucesso.');
+      let msg = erros > 0
+        ? `Sincronização concluída. ${erros} processo(s) falharam.`
+        : 'Todos os processos filtrados foram sincronizados com sucesso.';
+      if (totalAutoImportados > 0) {
+        msg += ` ${totalAutoImportados} processo(s) relacionado(s) importado(s) automaticamente.`;
       }
+      dialog.success(msg);
       load();
     } catch (e: any) {
       dialog.error(e?.message || 'Erro durante a sincronização.');
@@ -148,7 +155,10 @@ export default function SyncPage() {
   const handleSyncOne = async (p: Process) => {
     setSyncingId(p.id);
     try {
-      await syncProcess(p.id);
+      const result = await syncProcess(p.id) as any;
+      if (result.autoImportados > 0) {
+        dialog.success(`${p.numeroSei} sincronizado. ${result.autoImportados} processo(s) relacionado(s) importado(s).`);
+      }
       load();
     } catch (e: any) {
       dialog.error(e?.message || `Erro ao sincronizar ${p.numeroSei}.`);
@@ -157,7 +167,7 @@ export default function SyncPage() {
     }
   };
 
-  const hasFilters = search || statusFilter !== 'all' || unitFilter !== 'all' || tipoFilter !== 'all' || nivelFilter !== 'all' || dateFrom || dateTo;
+  const hasFilters = search || statusFilter !== 'all' || unitFilter !== 'all' || tipoFilter !== 'all' || nivelFilter !== 'all' || semAndamentos || dateFrom || dateTo;
 
   return (
     <div className="p-8 space-y-6" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -263,9 +273,19 @@ export default function SyncPage() {
               className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500/30"
             />
           </div>
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={semAndamentos}
+              onChange={(e) => { setSemAndamentos(e.target.checked); setPage(1); }}
+              className="rounded"
+              style={{ accentColor: '#009C60' }}
+            />
+            Sem andamentos
+          </label>
           {hasFilters && (
             <button
-              onClick={() => { setSearch(''); setStatusFilter('all'); setUnitFilter('all'); setTipoFilter('all'); setNivelFilter('all'); setDateFrom(''); setDateTo(''); setPage(1); }}
+              onClick={() => { setSearch(''); setStatusFilter('all'); setUnitFilter('all'); setTipoFilter('all'); setNivelFilter('all'); setDateFrom(''); setDateTo(''); setSemAndamentos(false); setPage(1); }}
               className="text-sm text-gray-500 hover:text-red-500 transition-colors"
             >
               Limpar filtros
@@ -354,8 +374,15 @@ export default function SyncPage() {
                     <td className="px-4 py-3">
                       <button
                         onClick={() => handleSyncOne(p)}
-                        disabled={syncingId === p.id || syncingAll}
+                        disabled={syncingId === p.id || syncingAll || Boolean(p.acessoRestrito) || (isConcluido && user.role !== 'admin')}
                         className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                        title={
+                          p.acessoRestrito
+                            ? 'Você não tem acesso a este processo restrito'
+                            : isConcluido && user.role !== 'admin'
+                            ? 'Somente administradores podem sincronizar processos finalizados'
+                            : ''
+                        }
                       >
                         {syncingId === p.id ? (
                           <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">

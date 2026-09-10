@@ -38,7 +38,7 @@ function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User)
         <Route path="/new-process" element={<NewProcess />} />
         <Route path="/tags" element={<TagsManager />} />
         <Route path="/reports" element={<Reports />} />
-        <Route path="/sync" element={<SyncPage />} />
+        <Route path="/sync" element={<SyncPage user={user} />} />
         <Route path="/admin" element={<Admin user={user} onUserUpdated={setUser} />} />
         <Route path="/profile" element={<Profile user={user} />} />
         <Route path="*" element={<Navigate to="/" replace />} />

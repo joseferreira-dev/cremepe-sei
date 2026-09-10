@@ -58,6 +58,7 @@ export interface Process {
   tags: Tag[];
   annotations: Annotation[];
   createdAt: string;
+  acessoRestrito?: boolean;
 }
 
 export interface SyncLog {

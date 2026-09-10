@@ -136,6 +136,7 @@ interface BackendProcess {
   createdAt: string;
   tags: Tag[];
   annotations: Annotation[];
+  acessoRestrito?: boolean;
 }
 
 function mapStatus(raw: string): Process['status'] {
@@ -171,6 +172,7 @@ export function mapProcess(p: BackendProcess): Process {
     tags: Array.isArray(p.tags) ? p.tags : [],
     annotations: Array.isArray(p.annotations) ? p.annotations : [],
     createdAt: p.createdAt,
+    acessoRestrito: Boolean(p.acessoRestrito),
   };
 }
 
@@ -182,6 +184,7 @@ export async function listProcesses(params: {
   status?: string;
   unit?: string;
   resumo?: string;
+  andamentos?: string;
   tipo?: string;
   nivelAcesso?: string;
   dateFrom?: string;
@@ -194,6 +197,7 @@ export async function listProcesses(params: {
   if (params.status && params.status !== 'all') qs.set('status', params.status);
   if (params.unit && params.unit !== 'all') qs.set('unit', params.unit);
   if (params.resumo && params.resumo !== 'all') qs.set('resumo', params.resumo);
+  if (params.andamentos && params.andamentos !== 'all') qs.set('andamentos', params.andamentos);
   if (params.tipo && params.tipo !== 'all') qs.set('tipo', params.tipo);
   if (params.nivelAcesso && params.nivelAcesso !== 'all') qs.set('nivelAcesso', params.nivelAcesso);
   if (params.dateFrom) qs.set('dateFrom', params.dateFrom);
@@ -222,13 +226,13 @@ export async function findProcessByNumero(numeroSei: string): Promise<Process | 
   return found ? mapProcess(found) : null;
 }
 
-export async function createProcess(numeroSei: string): Promise<Process> {
-  const data = await request<BackendProcess>('/processes', {
+export async function createProcess(numeroSei: string): Promise<Process & { autoImportados?: number }> {
+  const data = await request<BackendProcess & { autoImportados?: number }>('/processes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ numeroSei }),
   });
-  return mapProcess(data);
+  return { ...mapProcess(data), autoImportados: data.autoImportados };
 }
 
 export async function syncProcess(id: string): Promise<Process> {
@@ -238,7 +242,7 @@ export async function syncProcess(id: string): Promise<Process> {
   return mapProcess(data);
 }
 
-export async function syncBatch(ids: string[]): Promise<{ results: { id: string; status: string; mensagem: string }[]; total: number }> {
+export async function syncBatch(ids: string[]): Promise<{ results: { id: string; status: string; mensagem: string }[]; total: number; autoImportados: number }> {
   return request(`/processes/sync-batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

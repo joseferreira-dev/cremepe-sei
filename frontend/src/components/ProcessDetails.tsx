@@ -80,7 +80,7 @@ export default function ProcessDetails({ user }: Props) {
     );
   }
 
-  const acessoRestrito = process.nivelAcesso === 'Restrito' && user.role !== 'admin';
+  const acessoRestrito = Boolean(process.acessoRestrito);
 
   const cfg = statusConfig[process.status];
 
@@ -182,9 +182,13 @@ export default function ProcessDetails({ user }: Props) {
     if (!process) return;
     setSyncLoading(true);
     try {
-      const updated = await syncProcess(process.id);
+      const updated = await syncProcess(process.id) as any;
       setProcess(updated);
-      dialog.success('Processo sincronizado com o SEI.');
+      let msg = 'Processo sincronizado com o SEI.';
+      if (updated.autoImportados > 0) {
+        msg += ` ${updated.autoImportados} processo(s) relacionado(s) importado(s).`;
+      }
+      dialog.success(msg);
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao sincronizar com o SEI.');
     } finally {
@@ -248,11 +252,6 @@ export default function ProcessDetails({ user }: Props) {
       navigate('/process/' + existing.id);
       return;
     }
-    const ok = await dialog.confirm(
-      `O processo ${numero} não está cadastrado no sistema. Deseja cadastrá-lo agora?`,
-      { title: 'Processo não encontrado' }
-    );
-    if (!ok) return;
     try {
       const created = await createProcess(numero);
       navigate('/process/' + created.id);
@@ -359,7 +358,30 @@ export default function ProcessDetails({ user }: Props) {
         {statusError && <p className="text-red-600 text-sm mt-2">{statusError}</p>}
       </div>
 
+      {acessoRestrito && (
+        <div className="bg-white rounded-xl border border-gray-100 p-6">
+          <p className="text-sm text-gray-600 mb-4">
+            Este processo é de acesso restrito e não está nas suas unidades de trabalho. Os dados detalhados são exibidos apenas para administradores ou usuários das unidades vinculadas ao processo.
+          </p>
+          <div>
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Unidades</p>
+            <div className="flex flex-col gap-1">
+              {(process.unidades.length > 0 ? process.unidades : [process.unidadeAtual]).filter(Boolean).length > 0 ? (
+                (process.unidades.length > 0 ? process.unidades : [process.unidadeAtual]).filter(Boolean).map((u) => (
+                  <p key={u.sigla} className="text-sm font-semibold text-gray-800">
+                    {u.sigla} <span className="font-normal text-gray-500">{u.descricao}</span>
+                  </p>
+                ))
+              ) : (
+                <span className="text-xs text-gray-400">—</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
+      {!acessoRestrito && (
       <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
         <div className="border-b border-gray-100 flex">
           {allTabs.map((t) => (
@@ -489,6 +511,9 @@ export default function ProcessDetails({ user }: Props) {
                       </svg>
                     </div>
                     <span className="text-xs font-medium text-blue-700">Resumo gerado por IA</span>
+                    {process.resumoGeradoEm && (
+                      <span className="text-xs text-blue-500 ml-1">· {formatDataPtBR(process.resumoGeradoEm, true)}</span>
+                    )}
                   </div>
                   <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{resumo}</p>
                 </div>
@@ -771,6 +796,16 @@ export default function ProcessDetails({ user }: Props) {
           )}
         </div>
       </div>
+      )}
+
+      {acessoRestrito && (
+        <div className="bg-white rounded-xl border border-gray-100 py-16 text-center text-gray-400">
+          <svg className="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <p className="text-sm">Dados detalhados indisponíveis para este processo.</p>
+        </div>
+      )}
 
       {/* Upload Modal */}
       {showUploadModal && (

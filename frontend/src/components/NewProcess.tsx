@@ -47,9 +47,13 @@ export default function NewProcess() {
 
       try {
         const process = await createProcess(num);
+        let msg = `Processo ${process.numeroSei} importado com sucesso.`;
+        if (process.autoImportados && process.autoImportados > 0) {
+          msg += ` ${process.autoImportados} processo(s) relacionado(s) importado(s).`;
+        }
         setResults((prev) => [
           ...prev,
-          { numero: num, status: 'success', mensagem: `Processo ${process.numeroSei} importado com sucesso.` },
+          { numero: num, status: 'success', mensagem: msg },
         ]);
       } catch (err: any) {
         const msg = err?.message || 'Erro desconhecido';

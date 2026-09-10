@@ -858,27 +858,26 @@ export function isProcessoConcluido(
   procedimentosAnexados: { id: string; numero: string; tipo: string }[],
   parentStatus?: Map<string, string>
 ): boolean {
-  // Critério 1: se ainda tem unidades, não está concluído
-  if (unidades.length > 0) return false;
-
-  // Critério 2: último andamento menciona conclusão
-  const desc = (ultimoAndamento?.descricao || "").toLowerCase();
-  const temConclusao = desc.includes("conclusão do processo na unidade")
-    || desc.includes("conclusao do processo na unidade");
-  if (temConclusao) return true;
-
-  // Critério 3: se está anexado a processos pai
+  // Critério 1: herança — se TODOS os pais são finalizados, o filho também é
   const anexadosNumeros = new Set(procedimentosAnexados.map((p) => p.numero));
   const pais = procedimentosRelacionados.filter((p) => !anexadosNumeros.has(p.numero));
 
   if (pais.length > 0 && parentStatus && parentStatus.size > 0) {
-    // Se TODOS os pais são concluídos → o filho também é
     const todosPaisConcluidos = pais.every((p) => {
       const st = parentStatus.get(p.numero);
       return st === "finalizado";
     });
     if (todosPaisConcluidos) return true;
   }
+
+  // Critério 2: se ainda tem unidades, não está concluído
+  if (unidades.length > 0) return false;
+
+  // Critério 3: último andamento menciona conclusão
+  const desc = (ultimoAndamento?.descricao || "").toLowerCase();
+  const temConclusao = desc.includes("conclusão do processo na unidade")
+    || desc.includes("conclusao do processo na unidade");
+  if (temConclusao) return true;
 
   return false;
 }
