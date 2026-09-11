@@ -8,7 +8,7 @@ interface ImportResult {
   mensagem: string;
 }
 
-const SEI_REGEX = /\d{2}\.\d{2}\.\d{9}-\d/g;
+const SEI_REGEX = /\d{2}\.\d{1,2}\.\d{9}-\d/g;
 
 function extractSeiNumbers(text: string): string[] {
   const matches = text.match(SEI_REGEX) || [];

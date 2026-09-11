@@ -10,16 +10,15 @@ function tempoDesde(dataIso: string | null): string {
   if (!dataIso) return 'Nunca';
   const d = new Date(dataIso);
   if (isNaN(d.getTime())) return 'Nunca';
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const meses = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30));
-  const dias = Math.floor((diffMs % (1000 * 60 * 60 * 24 * 30)) / (1000 * 60 * 60 * 24));
-  const horas = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const diffMin = Math.floor((Date.now() - d.getTime()) / 60000);
+  const dias = Math.floor(diffMin / (60 * 24));
+  const horas = Math.floor((diffMin % (60 * 24)) / 60);
+  const minutos = diffMin % 60;
   const partes: string[] = [];
-  if (meses > 0) partes.push(`${meses} ${meses === 1 ? 'mês' : 'meses'}`);
   if (dias > 0) partes.push(`${dias} ${dias === 1 ? 'dia' : 'dias'}`);
-  if (partes.length === 0) partes.push(`${horas}h`);
-  return partes.join(', ');
+  if (horas > 0) partes.push(`${horas}h`);
+  if (minutos > 0) partes.push(`${minutos}min`);
+  return partes.length > 0 ? partes.join(', ') : 'menos de 1 min';
 }
 
 export default function SyncPage({ user }: { user: User }) {

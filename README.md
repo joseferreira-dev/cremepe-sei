@@ -52,7 +52,7 @@ SEI_ID_UNIDADE=110002083
 # LLM
 LLM_PROVIDER=gemini
 LLM_API_KEY=<sua-api-key>
-LLM_MODEL=gemini-2.5-flash
+LLM_MODEL=gemini-3.1-pro-preview
 LLM_BASE_URL=
 
 # Auth
