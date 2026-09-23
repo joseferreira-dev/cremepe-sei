@@ -80,6 +80,18 @@ async function permissaoDeAcesso(userId: string, process: ProcessoAcesso) {
   return { userRole, userUnitSiglas, acesso: verificarAcessoProcesso(process, userRole, userUnitSiglas) };
 }
 
+/** Unidades pelas quais o processo passou, derivadas dos andamentos. Usadas quando o processo não tem unidades abertas (ex.: finalizado). */
+function unidadesDeHistorico(andamentos: any[]): { id: string; sigla: string; descricao: string }[] {
+  const mapa = new Map<string, { id: string; sigla: string; descricao: string }>();
+  for (const a of andamentos) {
+    const un = a?.Unidade;
+    if (un?.IdUnidade && !mapa.has(un.IdUnidade)) {
+      mapa.set(un.IdUnidade, { id: un.IdUnidade, sigla: un.Sigla || "", descricao: un.Descricao || "" });
+    }
+  }
+  return Array.from(mapa.values());
+}
+
 async function syncProcesso(procId: string): Promise<SyncResult> {
   const proc = await prisma.process.findUnique({ where: { id: procId } });
   if (!proc) return { status: "error", mensagem: "Processo não encontrado." };
@@ -185,7 +197,7 @@ async function syncProcesso(procId: string): Promise<SyncResult> {
       assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
       interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
       unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({ id: seiData.UnidadeAtual.IdUnidade, sigla: seiData.UnidadeAtual.Sigla, descricao: seiData.UnidadeAtual.Descricao }) : proc.unidadeAtual,
-      unidades: JSON.stringify(unidadesReais),
+      unidades: JSON.stringify(unidadesReais.length > 0 ? unidadesReais : unidadesDeHistorico(andamentosSync)),
       andamentos: andamentosSync.length > 0
         ? JSON.stringify(andamentosSync.map((a) => ({ id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora, usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "" })))
         : proc.andamentos,
@@ -247,7 +259,11 @@ router.get("/", async (req: Request, res: Response) => {
     }
 
     if (unit && unit !== "all") {
-      where.unidadeAtual = { contains: `"sigla":"${unit}"` };
+      where.OR = [
+        ...(where.OR || []),
+        { unidadeAtual: { contains: `"sigla":"${unit}"` } },
+        { unidades: { contains: `"sigla":"${unit}"` } },
+      ];
     }
 
     if (resumo === "1") {
@@ -617,7 +633,7 @@ router.post("/", async (req: Request, res: Response) => {
           sigla: seiData.UnidadeAtual.Sigla,
           descricao: seiData.UnidadeAtual.Descricao,
         }) : null,
-        unidades: JSON.stringify(unidades),
+        unidades: JSON.stringify(unidades.length > 0 ? unidades : unidadesDeHistorico(andamentosData)),
         andamentos: JSON.stringify(andamentosData.map((a) => ({
           id: a.IdAndamento,
           descricao: a.Descricao,
@@ -769,7 +785,7 @@ router.post("/import", async (req: Request, res: Response) => {
               sigla: seiData.UnidadeAtual.Sigla,
               descricao: seiData.UnidadeAtual.Descricao,
             }) : null,
-            unidades: JSON.stringify(unidadesAbertasBatch),
+            unidades: JSON.stringify(unidadesAbertasBatch.length > 0 ? unidadesAbertasBatch : unidadesDeHistorico(andamentosBatch)),
             unidadeSincronizacao: unidadesComDadosBatch.length > 0 ? JSON.stringify(unidadesComDadosBatch.map((id) => ({ id }))) : null,
             andamentos: JSON.stringify(andamentosBatch.map((a) => ({
               id: a.IdAndamento,

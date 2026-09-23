@@ -32,8 +32,8 @@ function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User)
     <Layout user={user} currentPage={location.pathname} onLogout={onLogout}>
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/processes" element={<ProcessList user={user} />} />
-        <Route path="/processes/sem-resumo" element={<ProcessList onlyWithoutResumo user={user} />} />
+        <Route path="/processes" element={<ProcessList />} />
+        <Route path="/processes/sem-resumo" element={<ProcessList onlyWithoutResumo />} />
         <Route path="/process/:id" element={<ProcessDetails user={user} />} />
         <Route path="/new-process" element={<NewProcess />} />
         <Route path="/tags" element={<TagsManager />} />

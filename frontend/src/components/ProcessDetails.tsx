@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { User, Process, ProcessStatus, Annotation, Tag } from '../types';
 import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, saveSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listProcessosPai, type ProcessoPai } from '../api';
@@ -17,13 +17,14 @@ const statusConfig: Record<ProcessStatus, { label: string; color: string; bg: st
   sobrestado: { label: 'Sobrestado', color: '#374151', bg: '#F3F4F6' },
 };
 
+const anotacaoLimit = 5;
+
 export default function ProcessDetails({ user }: Props) {
   const { id: processId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const dialog = useDialog();
   const [process, setProcess] = useState<Process | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [tab, setTab] = useState<'sei' | 'resumo' | 'andamentos' | 'anotacoes' | 'tags' | 'relacionados'>('sei');
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [newAnnotation, setNewAnnotation] = useState('');
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
@@ -36,6 +37,7 @@ export default function ProcessDetails({ user }: Props) {
   const [resumo, setResumo] = useState('');
   const [resumoPreview, setResumoPreview] = useState<string | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [editingPreview, setEditingPreview] = useState(false);
   const [savingResume, setSavingResume] = useState(false);
   const [showEditResumoModal, setShowEditResumoModal] = useState(false);
   const [editResumoText, setEditResumoText] = useState('');
@@ -45,6 +47,8 @@ export default function ProcessDetails({ user }: Props) {
   const [statusSaving, setStatusSaving] = useState(false);
   const [processosPai, setProcessosPai] = useState<ProcessoPai[]>([]);
   const [paisLoading, setPaisLoading] = useState(false);
+  const [showAllAnotacoes, setShowAllAnotacoes] = useState(false);
+  const [showAndamentosDialog, setShowAndamentosDialog] = useState(false);
 
   useEffect(() => {
     if (!processId) { setNotFound(true); return; }
@@ -58,17 +62,11 @@ export default function ProcessDetails({ user }: Props) {
       .catch(() => setNotFound(true));
     listAnnotations(processId).then((a) => setAnnotations(Array.isArray(a) ? a : [])).catch(() => {});
     listTags().then((t) => setAvailTags(t)).catch(() => {});
+    listProcessosPai(processId)
+      .then(setProcessosPai)
+      .catch(() => {})
+      .finally(() => setPaisLoading(false));
   }, [processId]);
-
-  useEffect(() => {
-    if (tab === 'relacionados' && processId && processosPai.length === 0 && !paisLoading) {
-      setPaisLoading(true);
-      listProcessosPai(processId)
-        .then(setProcessosPai)
-        .catch(() => {})
-        .finally(() => setPaisLoading(false));
-    }
-  }, [tab, processId]);
 
   if (notFound || !process) {
     return (
@@ -130,6 +128,7 @@ export default function ProcessDetails({ user }: Props) {
     try {
       const { resumo: generated } = await generateSummary(process.id, uploadFiles, resumoManualText);
       setResumoPreview(generated);
+      setEditingPreview(false);
       setShowPreviewModal(true);
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao gerar resumo.');
@@ -150,7 +149,6 @@ export default function ProcessDetails({ user }: Props) {
       await getProcess(process.id).then(setProcess);
       setShowPreviewModal(false);
       setResumoPreview(null);
-      setTab('resumo');
       dialog.success('Resumo salvo com sucesso!');
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao salvar resumo.');
@@ -238,15 +236,6 @@ export default function ProcessDetails({ user }: Props) {
     }
   };
 
-  const allTabs = [
-    { id: 'sei', label: 'Dados SEI' },
-    { id: 'resumo', label: 'Resumo' },
-    { id: 'andamentos', label: 'Andamentos' },
-    { id: 'anotacoes', label: `Anotações (${annotations.length})` },
-    { id: 'tags', label: 'Tags' },
-    { id: 'relacionados', label: 'Processos Relacionados' },
-  ] as const;
-
   const handleClickRelated = async (numero: string) => {
     const existing = await findProcessByNumero(numero);
     if (existing) {
@@ -261,8 +250,26 @@ export default function ProcessDetails({ user }: Props) {
     }
   };
 
+  const unidadesDiretas = (
+    process.unidades.length > 0 ? process.unidades : process.unidadeAtual?.sigla ? [process.unidadeAtual] : []
+  ).filter((u) => u && u.sigla);
+  const unidadesExibiveis =
+    unidadesDiretas.length > 0
+      ? unidadesDiretas
+      : Array.from(
+          new Map(
+            process.andamentos
+              .map((a) => a.unidade)
+              .filter(Boolean)
+              .map((sigla) => [sigla, { id: '', sigla, descricao: '' }]),
+          ).values(),
+        );
+  const unidadesDeHistorico = unidadesDiretas.length === 0 && unidadesExibiveis.length > 0;
+
+  const anotacoesVisiveis = showAllAnotacoes ? annotations : annotations.slice(0, anotacaoLimit);
+
   return (
-    <div className="p-8 space-y-6 max-w-5xl" style={{ fontFamily: "'Inter', sans-serif" }}>
+    <div className="p-8 space-y-6" style={{ fontFamily: "'Inter', sans-serif" }}>
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-gray-500">
         <button onClick={() => navigate('/processes')} className="hover:underline" style={{ color: '#009C60' }}>
@@ -278,14 +285,12 @@ export default function ProcessDetails({ user }: Props) {
           <svg className="w-4 h-4 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
           </svg>
-          <p className="text-amber-800 text-sm">
-            Acesso restrito
-          </p>
+          <p className="text-amber-800 text-sm">Acesso restrito</p>
         </div>
       )}
 
       <div className="bg-white rounded-xl border border-gray-100 p-6">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap mb-2">
               <span className="font-mono text-xl font-bold text-gray-800">{process.numeroSei}</span>
@@ -367,8 +372,8 @@ export default function ProcessDetails({ user }: Props) {
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Unidades</p>
             <div className="flex flex-col gap-1">
-              {(process.unidades.length > 0 ? process.unidades : [process.unidadeAtual]).filter(Boolean).length > 0 ? (
-                (process.unidades.length > 0 ? process.unidades : [process.unidadeAtual]).filter(Boolean).map((u) => (
+              {unidadesExibiveis.length > 0 ? (
+                unidadesExibiveis.map((u) => (
                   <p key={u.sigla} className="text-sm font-semibold text-gray-800">
                     {u.sigla} <span className="font-normal text-gray-500">{u.descricao}</span>
                   </p>
@@ -381,205 +386,154 @@ export default function ProcessDetails({ user }: Props) {
         </div>
       )}
 
-      {/* Tabs */}
       {!acessoRestrito && (
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-        <div className="border-b border-gray-100 flex">
-          {allTabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`px-6 py-3.5 text-sm font-medium transition-all border-b-2 ${
-                tab === t.id
-                  ? 'border-green-600 text-green-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-              style={tab === t.id ? { borderBottomColor: '#009C60', color: '#009C60' } : {}}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <>
+          {/* Corpo: informações principais + resumo lateral */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+            <div className="xl:col-span-2 space-y-6 xl:order-2">
+              {/* Dados do processo */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <InfoCard title="Processo">
+                  <Dado label="Tipo" value={process.tipo || '—'} />
+                  <Dado label="Data de Autuação" value={process.dataAutuacao ? formatDataPtBR(process.dataAutuacao) : '—'} />
+                  <Dado label="Nível de Acesso" value={process.nivelAcesso || '—'} />
+                  <Dado label="Última Sincronização" value={process.sincronizadoEm ? formatDataPtBR(process.sincronizadoEm, true) : '—'} />
+                  {process.linkSei && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-0.5">Link SEI</p>
+                      <a href={process.linkSei} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline break-all line-clamp-2" title={process.linkSei}>
+                        {process.linkSei}
+                      </a>
+                    </div>
+                  )}
+                </InfoCard>
 
-        <div className="p-6">
-          {/* SEI data */}
-          {tab === 'sei' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <Field label="Tipo" value={process.tipo} />
-                {process.dataAutuacao && <Field label="Data de Autuação" value={formatDataPtBR(process.dataAutuacao)} />}
-                <Field label="Nível de Acesso" value={process.nivelAcesso || '—'} />
-                {process.linkSei && (
-                  <div>
-                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Link SEI</p>
-                    <a
-                      href={process.linkSei}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:underline break-all"
-                    >
-                      {process.linkSei}
-                    </a>
-                  </div>
-                )}
-                <div>
-                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Assuntos</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {process.assuntos.length > 0 ? process.assuntos.map((a) => (
-                      <span key={a} className="text-xs px-2 py-0.5 bg-gray-100 text-gray-700 rounded">{a}</span>
-                    )) : <span className="text-xs text-gray-400">—</span>}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Interessados</p>
-                  <div className="space-y-1">
-                    {process.interessados.length > 0 ? process.interessados.map((i) => (
-                      <p key={i} className="text-sm text-gray-800">{i}</p>
-                    )) : <span className="text-xs text-gray-400">—</span>}
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Unidades</p>
-                  {(process.unidades.length > 0 ? process.unidades : [process.unidadeAtual]).filter(Boolean).length > 0 ? (
-                    <div className="flex flex-col gap-1">
-                      {(process.unidades.length > 0 ? process.unidades : [process.unidadeAtual]).filter(Boolean).map((u, i) => (
-                        <div key={i}>
+                <InfoCard title={process.status === 'em_andamento' ? 'Unidades onde está aberto' : 'Unidades'}>
+                  {unidadesExibiveis.length > 0 ? (
+                    <div className="flex flex-col gap-2">
+                      {unidadesDeHistorico && (
+                        <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Por onde o processo passou</p>
+                      )}
+                      {unidadesExibiveis.map((u) => (
+                        <div key={u.sigla + (u.id || '')} className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
                           <p className="text-sm font-semibold text-gray-800">{u.sigla}</p>
-                          <p className="text-xs text-gray-500">{u.descricao}</p>
+                          {u.descricao && <p className="text-xs text-gray-500">{u.descricao}</p>}
                         </div>
                       ))}
                     </div>
-                  ) : <span className="text-xs text-gray-400">—</span>}
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Último Andamento</p>
-                  {process.ultimoAndamento.descricao ? (
-                    <>
-                      <p className="text-sm text-gray-800">{cleanSeiText(process.ultimoAndamento.descricao)}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        {process.ultimoAndamento.dataHora && formatDataPtBR(process.ultimoAndamento.dataHora, true)}
-                        {process.ultimoAndamento.usuario && ` · ${process.ultimoAndamento.usuario}`}
-                        {process.ultimoAndamento.unidade && ` · ${process.ultimoAndamento.unidade}`}
-                      </p>
-                    </>
-                  ) : <span className="text-xs text-gray-400">—</span>}
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Última Sincronização</p>
-                  <p className="text-sm text-gray-600">{process.sincronizadoEm ? formatDataPtBR(process.sincronizadoEm, true) : '—'}</p>
-                </div>
+                  ) : <p className="text-sm text-gray-400">—</p>}
+                </InfoCard>
               </div>
-            </div>
-          )}
 
-          {/* Resumo IA */}
-          {tab === 'resumo' && (
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-gray-800" style={{ fontFamily: "'Outfit', sans-serif" }}>Resumo</h3>
-                <div className="flex items-center gap-2">
-                  {resumo && (
-                    <button
-                      onClick={() => { setShowEditResumoModal(true); setEditResumoText(resumo); }}
-                      className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                      Editar
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setShowUploadModal(true)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white rounded-lg"
-                    style={{ background: '#29ABE2' }}
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                    {resumo ? 'Regenerar Resumo' : 'Gerar Resumo com IA'}
-                  </button>
-                </div>
-              </div>
-              {resumo ? (
-                <div className="bg-blue-50 border border-blue-100 rounded-xl p-5">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: '#29ABE2' }}>
-                      <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                      </svg>
-                    </div>
-                    <span className="text-xs font-medium text-blue-700">Resumo gerado por IA</span>
-                    {process.resumoGeradoEm && (
-                      <span className="text-xs text-blue-500 ml-1">· {formatDataPtBR(process.resumoGeradoEm, true)}</span>
-                    )}
-                  </div>
-                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{resumo}</p>
-                </div>
-              ) : (
-                <div className="text-center py-16 text-gray-400">
-                  <svg className="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          {/* Último andamento + Relacionados */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl border border-gray-100 p-6">
+              <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+                <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wide" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                  Último Andamento
+                </h2>
+                <button
+                  onClick={() => setShowAndamentosDialog(true)}
+                  className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 border rounded-lg transition-colors hover:bg-green-50"
+                  style={{ color: '#009C60', borderColor: '#009C60' }}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <p className="text-sm">Nenhum resumo gerado ainda.</p>
-                  <p className="text-xs mt-1">Clique em "Gerar Resumo com IA" e envie os documentos iniciais do processo.</p>
-                </div>
+                  Ver histórico ({process.andamentos.length})
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">Movimentação mais recente registrada no SEI</p>
+              {process.ultimoAndamento.descricao ? (
+                <>
+                  <p className="text-sm text-gray-800 leading-relaxed">{cleanSeiText(process.ultimoAndamento.descricao)}</p>
+                  {(process.ultimoAndamento.dataHora || process.ultimoAndamento.usuario || process.ultimoAndamento.unidade) && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      {process.ultimoAndamento.dataHora && formatDataPtBR(process.ultimoAndamento.dataHora, true)}
+                      {process.ultimoAndamento.usuario && ` · ${process.ultimoAndamento.usuario}`}
+                      {process.ultimoAndamento.unidade && ` · ${process.ultimoAndamento.unidade}`}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-gray-400">Sem andamentos registrados.</p>
               )}
             </div>
-          )}
 
-          {/* Andamentos */}
-          {tab === 'andamentos' && (
-            <div>
-              <h3 className="font-semibold text-gray-800 mb-4" style={{ fontFamily: "'Outfit', sans-serif" }}>
-                Histórico de Andamentos
-              </h3>
-              {process.andamentos.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
-                  <svg className="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <p className="text-sm">Nenhum andamento registrado neste processo.</p>
-                  <p className="text-xs mt-1">Faça uma sincronização para buscar os andamentos no SEI.</p>
+            <div className="bg-white rounded-xl border border-gray-100 p-6">
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wide" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                  Processos Relacionados
+                </h2>
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                  {process.procedimentosAnexados.length + processosPai.length}
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">
+                {process.procedimentosAnexados.length} anexado(s) · {processosPai.length} no(s) qual(is) este está incluído
+              </p>
+              {process.procedimentosAnexados.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Anexados</p>
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                    {process.procedimentosAnexados.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleClickRelated(p.numero)}
+                        className="w-full text-left px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-100 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                      >
+                        <p className="font-mono text-xs font-semibold text-gray-800 hover:text-blue-700">{p.numero}</p>
+                        {p.tipo && <p className="text-[11px] text-gray-500 truncate">{p.tipo}</p>}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              ) : (
-                <div className="space-y-0">
-                  {process.andamentos.map((and, idx) => (
-                    <div key={and.id || idx} className="flex gap-4">
-                      <div className="flex flex-col items-center">
-                        <div className="w-3 h-3 rounded-full border-2 border-white shrink-0" style={{ background: '#009C60' }} />
-                        {idx < process.andamentos.length - 1 && <div className="w-0.5 flex-1 bg-gray-200" />}
-                      </div>
-                      <div className="pb-6 flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-mono text-gray-400">
-                            {formatDataPtBR(and.dataHora, true)}
-                          </span>
-                          {and.unidade && (
-                            <span className="text-xs font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
-                              {and.unidade}
-                            </span>
-                          )}
-                          {and.usuario && (
-                            <span className="text-xs text-gray-500">
-                              — {and.usuario}
-                            </span>
+              )}
+              {processosPai.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Origens (incluem este)</p>
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                    {processosPai.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleClickRelated(p.numero)}
+                        className="w-full text-left px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-100 hover:border-amber-300 hover:bg-amber-50 transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <p className="font-mono text-xs font-semibold text-gray-800 hover:text-amber-700">{p.numero}</p>
+                          {p.statusSistema === 'finalizado' && (
+                            <span className="text-[10px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded-full font-medium">Finalizado</span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-700 mt-1 leading-relaxed">{cleanSeiText(and.descricao)}</p>
-                      </div>
-                    </div>
-                  ))}
+                        {p.tipo && <p className="text-[11px] text-gray-500 truncate">{p.tipo}</p>}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
+              {process.procedimentosAnexados.length === 0 && processosPai.length === 0 && (
+                <p className="text-sm text-gray-400">Nenhum processo relacionado.</p>
+              )}
             </div>
-          )}
+          </div>
 
           {/* Anotações */}
-          {tab === 'anotacoes' && (
-            <div>
+          <section className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
+              <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wide" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                Anotações{annotations.length > 0 && ` (${annotations.length})`}
+              </h2>
+              {annotations.length > anotacaoLimit && (
+                <button
+                  onClick={() => setShowAllAnotacoes(!showAllAnotacoes)}
+                  className="text-xs font-medium hover:underline"
+                  style={{ color: '#009C60' }}
+                >
+                  {showAllAnotacoes ? 'Mostrar menos' : `Mostrar todas (${annotations.length})`}
+                </button>
+              )}
+            </div>
+            <div className="px-6 py-5">
               <div className="mb-5">
                 <textarea
                   value={newAnnotation}
@@ -603,11 +557,11 @@ export default function ProcessDetails({ user }: Props) {
                 <p className="text-center text-gray-400 text-sm py-8">Nenhuma anotação ainda.</p>
               ) : (
                 <div className="space-y-3">
-                  {annotations.map((ann) => (
+                  {anotacoesVisiveis.map((ann) => (
                     <div key={ann.id} className="border border-gray-100 rounded-xl p-4">
                       <div className="flex items-center gap-2 mb-2">
                         <div
-                          className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0"
                           style={{ background: '#009C60' }}
                         >
                           {ann.userName.split(' ').map((n) => n[0]).slice(0, 2).join('')}
@@ -674,129 +628,86 @@ export default function ProcessDetails({ user }: Props) {
                 </div>
               )}
             </div>
-          )}
+          </section>
+          </div>
 
-          {/* Tags */}
-          {tab === 'tags' && (
-            <div>
-              <p className="text-sm text-gray-600 mb-4">Tags associadas a este processo:</p>
-              <div className="flex flex-wrap gap-2 mb-6">
-                {process.tags.map((t) => (
-                  <div key={t.id} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-white text-sm font-medium" style={{ background: t.color }}>
-                    {t.name}
-                    <button
-                      onClick={() => handleToggleTag(t.id)}
-                      className="ml-1 opacity-70 hover:opacity-100"
-                      title="Remover tag"
-                    >
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+          {/* Resumo IA lateral */}
+          <div className="xl:col-span-1 space-y-6 xl:order-1">
+            <div className="xl:sticky xl:top-6">
+              <section className="bg-white rounded-xl overflow-hidden shadow-lg">
+                <div className="h-1.5" style={{ background: 'linear-gradient(90deg, #009C60 0%, #29ABE2 100%)' }} />
+                <div className="p-6">
+                  <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#009C60' }}>
+                        <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wide" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                          Resumo
+                        </h2>
+                        <p className="text-[11px] text-gray-400">
+                          {process.resumoGeradoEm ? `Gerado em ${formatDataPtBR(process.resumoGeradoEm, true)}` : 'Visão geral executiva do processo'}
+                        </p>
+                      </div>
+                    </div>
+                    {resumo && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { setShowEditResumoModal(true); setEditResumoText(resumo); }}
+                          className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => setShowUploadModal(true)}
+                          className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-white rounded-lg"
+                          style={{ background: '#009C60' }}
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          Regenerar Resumo
+                        </button>
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-              <p className="text-xs text-gray-500 mb-3">Adicionar tag:</p>
-              <div className="flex flex-wrap gap-2">
-                {availTags.filter((t) => !process.tags.find((x) => x.id === t.id)).map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => handleToggleTag(t.id)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-colors"
-                    style={{ borderColor: t.color, color: t.color }}
-                  >
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                    </svg>
-                    {t.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Processos Relacionados */}
-          {tab === 'relacionados' && (
-            <div>
-              <div className="mb-6">
-                <h3 className="font-semibold text-gray-800 mb-3" style={{ fontFamily: "'Outfit', sans-serif" }}>
-                  Processos Anexados
-                </h3>
-                <p className="text-xs text-gray-500 mb-3">Processos que estão anexados (incluídos) neste processo:</p>
-                {process.procedimentosAnexados.length === 0 ? (
-                  <p className="text-sm text-gray-400 italic">Nenhum processo anexado.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {process.procedimentosAnexados.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => handleClickRelated(p.numero)}
-                        className="w-full flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left group"
-                      >
-                        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform" style={{ background: '#E0F2FE' }}>
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#0369A1" strokeWidth={1.8}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                  {resumo ? (
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: '#009C60' }}>
+                          <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                           </svg>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-mono font-semibold text-gray-800 group-hover:text-blue-700 transition-colors">{p.numero}</p>
-                          {p.tipo && <p className="text-xs text-gray-500 truncate">{p.tipo}</p>}
-                        </div>
-                        <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">Anexado</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <h3 className="font-semibold text-gray-800 mb-3" style={{ fontFamily: "'Outfit', sans-serif" }}>
-                  Processos que incluem este
-                </h3>
-                <p className="text-xs text-gray-500 mb-3">Processos nos quais este processo está anexado:</p>
-                {paisLoading ? (
-                  <p className="text-sm text-gray-400 italic">Buscando processos pai...</p>
-                ) : processosPai.length === 0 ? (
-                  <p className="text-sm text-gray-400 italic">Não está anexado em nenhum outro processo.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {processosPai.map((p) => (
+                        <span className="text-xs font-semibold text-green-700">Resumo gerado por IA</span>
+                      </div>
+                      <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{resumo}</p>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 px-4 rounded-xl border border-dashed border-green-200 bg-green-50/50">
+                      <p className="text-sm text-gray-700 font-medium">Nenhum resumo gerado ainda.</p>
+                      <p className="text-xs mt-1 text-gray-500">Clique em "Gerar Resumo com IA" e envie os documentos iniciais do processo.</p>
                       <button
-                        key={p.id}
-                        onClick={() => handleClickRelated(p.numero)}
-                        className="w-full flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-amber-300 hover:bg-amber-50/50 transition-colors text-left group"
+                        onClick={() => setShowUploadModal(true)}
+                        className="mt-4 px-4 py-2 text-sm font-medium text-white rounded-lg"
+                        style={{ background: '#009C60' }}
                       >
-                        <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform" style={{ background: '#FEF3C7' }}>
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#92400E" strokeWidth={1.8}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                          </svg>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-mono font-semibold text-gray-800 group-hover:text-amber-700 transition-colors">{p.numero}</p>
-                          {p.tipo && <p className="text-xs text-gray-500 truncate">{p.tipo}</p>}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {p.statusSistema === 'finalizado' && (
-                            <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-medium">Finalizado</span>
-                          )}
-                          <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">Processo pai</span>
-                        </div>
+                        Gerar Resumo
                       </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {process.procedimentosRelacionados.length === 0 && process.procedimentosAnexados.length === 0 && processosPai.length === 0 && (
-                <div className="text-center py-8 text-gray-400">
-                  <p className="text-sm">Nenhum processo relacionado encontrado.</p>
-                  <p className="text-xs mt-1">Faça uma sincronização para buscar os dados no SEI.</p>
+                    </div>
+                  )}
                 </div>
-              )}
+              </section>
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+          </div>
+        </>
       )}
 
       {acessoRestrito && (
@@ -808,12 +719,73 @@ export default function ProcessDetails({ user }: Props) {
         </div>
       )}
 
+      {/* Histórico de Andamentos Dialog */}
+      {showAndamentosDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wide" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                Histórico de Andamentos{process.andamentos.length > 0 && ` (${process.andamentos.length})`}
+              </h2>
+              <button onClick={() => setShowAndamentosDialog(false)} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              {process.andamentos.length === 0 ? (
+                <div className="text-center py-10 text-gray-400">
+                  <p className="text-sm">Nenhum andamento registrado neste processo.</p>
+                  <p className="text-xs mt-1">Faça uma sincronização para buscar os andamentos no SEI.</p>
+                </div>
+              ) : (
+                <div className="space-y-0">
+                  {process.andamentos.map((and, idx) => (
+                    <div key={and.id || idx} className="flex gap-4">
+                      <div className="flex flex-col items-center">
+                        <div className="w-3 h-3 rounded-full border-2 border-white shrink-0" style={{ background: idx === 0 ? '#F59E0B' : '#009C60' }} />
+                        {idx < process.andamentos.length - 1 && <div className="w-0.5 flex-1 bg-gray-200" />}
+                      </div>
+                      <div className="pb-6 flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-mono text-gray-400">
+                            {formatDataPtBR(and.dataHora, true)}
+                          </span>
+                          {and.unidade && (
+                            <span className="text-xs font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                              {and.unidade}
+                            </span>
+                          )}
+                          {and.usuario && (
+                            <span className="text-xs text-gray-500">— {and.usuario}</span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-700 mt-1 leading-relaxed">{cleanSeiText(and.descricao)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end p-6 border-t border-gray-100">
+              <button
+                onClick={() => setShowAndamentosDialog(false)}
+                className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Upload Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
-              <h2 className="text-lg font-bold text-gray-900" style={{ fontFamily: "'Outfit', sans-serif" }}>
+              <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wide" style={{ fontFamily: "'Outfit', sans-serif" }}>
                 Gerar Resumo com IA
               </h2>
               <button onClick={() => setShowUploadModal(false)} className="text-gray-400 hover:text-gray-600">
@@ -827,7 +799,6 @@ export default function ProcessDetails({ user }: Props) {
                 Envie documentos e/ou insira o texto do processo. A IA irá gerar um resumo executivo a partir do conteúdo fornecido.
               </p>
 
-              {/* Texto manual */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Texto do processo</label>
                 <textarea
@@ -839,7 +810,6 @@ export default function ProcessDetails({ user }: Props) {
                 />
               </div>
 
-              {/* Upload de arquivos */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Documentos</label>
                 <label className="block border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer hover:border-green-400 transition-colors">
@@ -919,40 +889,57 @@ export default function ProcessDetails({ user }: Props) {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl">
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
-              <h2 className="text-lg font-bold text-gray-900" style={{ fontFamily: "'Outfit', sans-serif" }}>
+              <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wide" style={{ fontFamily: "'Outfit', sans-serif" }}>
                 Pré-visualização do Resumo
               </h2>
-              <button onClick={() => { setShowPreviewModal(false); setResumoPreview(null); }} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => { setShowPreviewModal(false); setResumoPreview(null); setEditingPreview(false); }} className="text-gray-400 hover:text-gray-600">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            <div className="p-6 max-h-[60vh] overflow-y-auto">
-              <div className="bg-gray-50 rounded-xl p-5">
-                <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{resumoPreview}</p>
-              </div>
+            <div className="p-6">
+              {editingPreview ? (
+                <div className="bg-gray-50 rounded-xl p-5">
+                  <textarea
+                    value={resumoPreview}
+                    onChange={(e) => setResumoPreview(e.target.value)}
+                    className="w-full h-72 bg-transparent resize-none focus:outline-none text-sm text-gray-800 leading-relaxed"
+                    placeholder="Edite o resumo aqui…"
+                  />
+                </div>
+              ) : (
+                <div className="bg-gray-50 rounded-xl p-5 max-h-[60vh] overflow-y-auto">
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{resumoPreview}</p>
+                </div>
+              )}
             </div>
             <div className="flex gap-3 p-6 border-t border-gray-100">
               <button
-                onClick={() => { setShowPreviewModal(false); setResumoPreview(null); }}
+                onClick={() => { setShowPreviewModal(false); setResumoPreview(null); setEditingPreview(false); }}
                 className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
               >
                 Cancelar
               </button>
               <button
+                onClick={() => setEditingPreview(!editingPreview)}
+                className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Editar
+              </button>
+              <button
                 onClick={() => { setShowPreviewModal(false); setShowUploadModal(true); }}
                 className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
               >
-                Editar e Regenerar
+                Regenerar
               </button>
               <button
                 onClick={handleSaveResume}
-                disabled={savingResume}
+                disabled={savingResume || !resumoPreview.trim()}
                 className="flex-1 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50"
                 style={{ background: '#009C60' }}
               >
-                {savingResume ? 'Salvando…' : 'Confirmar e Salvar'}
+                {savingResume ? 'Salvando…' : 'Salvar'}
               </button>
             </div>
           </div>
@@ -964,7 +951,7 @@ export default function ProcessDetails({ user }: Props) {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl">
             <div className="flex items-center justify-between p-6 border-b border-gray-100">
-              <h2 className="text-lg font-bold text-gray-900" style={{ fontFamily: "'Outfit', sans-serif" }}>
+              <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wide" style={{ fontFamily: "'Outfit', sans-serif" }}>
                 Editar Resumo
               </h2>
               <button onClick={() => setShowEditResumoModal(false)} className="text-gray-400 hover:text-gray-600">
@@ -1005,11 +992,22 @@ export default function ProcessDetails({ user }: Props) {
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function InfoCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div>
-      <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">{label}</p>
-      <p className="text-sm text-gray-800">{value}</p>
+    <div className="bg-white rounded-xl border border-gray-100 p-5">
+      <p className="text-sm font-semibold text-gray-800 uppercase tracking-wide mb-3" style={{ fontFamily: "'Outfit', sans-serif" }}>
+        {title}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function Dado({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mb-3">
+      <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
+      <p className="text-sm font-medium text-gray-800">{value}</p>
     </div>
   );
 }

@@ -3,7 +3,9 @@ interface Props {
   totalPages: number;
   total: number;
   perPage: number;
+  perPageOptions?: number[];
   onPageChange: (page: number) => void;
+  onPerPageChange?: (value: number) => void;
 }
 
 function getPageNumbers(current: number, total: number): (number | '...')[] {
@@ -23,16 +25,32 @@ function getPageNumbers(current: number, total: number): (number | '...')[] {
   return pages;
 }
 
-export default function Pagination({ page, totalPages, total, perPage, onPageChange }: Props) {
-  if (totalPages <= 1) return null;
+export default function Pagination({ page, totalPages, total, perPage, perPageOptions, onPageChange, onPerPageChange }: Props) {
+  if (totalPages <= 1 && !onPerPageChange) return null;
 
   const pages = getPageNumbers(page, totalPages);
 
   return (
     <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-      <p className="text-xs text-gray-500">
-        Mostrando {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} de {total}
-      </p>
+      <div className="flex items-center gap-3">
+        {onPerPageChange && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-gray-500">Itens por página:</span>
+            <select
+              value={perPage}
+              onChange={(e) => onPerPageChange(Number(e.target.value))}
+              className="text-xs border border-gray-200 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-500"
+            >
+              {(perPageOptions || [10, 25, 50, 100]).map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <p className="text-xs text-gray-500">
+          Mostrando {(page - 1) * perPage + 1}–{Math.min(page * perPage, total)} de {total}
+        </p>
+      </div>
       <div className="flex items-center gap-1">
         <button
           onClick={() => onPageChange(Math.max(1, page - 1))}

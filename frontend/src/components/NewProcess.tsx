@@ -17,11 +17,8 @@ function extractSeiNumbers(text: string): string[] {
 
 const PLACEHOLDER = `Cole os números dos processos (o sistema extrai automaticamente):
 
-26.17.000008588-9
-25.17.000009817-9
-26.17.000009307-5
-27.17.000010045-1
-26.17.000009336-9`;
+23.17.000033345-1
+26.17.000002226-9...`;
 
 export default function NewProcess() {
   const navigate = useNavigate();
@@ -84,14 +81,6 @@ export default function NewProcess() {
 
   return (
     <div className="p-8" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <div className="flex items-center gap-2 text-sm text-gray-500 mb-6">
-        <button onClick={() => navigate('/processes')} className="hover:underline" style={{ color: '#009C60' }}>
-          Processos
-        </button>
-        <span>/</span>
-        <span>Cadastrar Processo</span>
-      </div>
-
       <h1 className="text-2xl font-bold text-gray-900 mb-1" style={{ fontFamily: "'Outfit', sans-serif" }}>
         Cadastrar Processo
       </h1>
