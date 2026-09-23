@@ -33,6 +33,16 @@ body,
   --color-cremepe-darker: #003D26;
   --color-sei-blue: #29ABE2;
   --color-sei-lime: #8DC63F;
+
+  /* Cinzas com maior contraste: branco (cards) vs. fundo e bordas ficam distintos,
+     e textos sutis (gray-400/500) seguem legíveis. */
+  --color-gray-50: #f3f4f6;
+  --color-gray-100: #e5e7eb;
+  --color-gray-200: #d1d5db;
+  --color-gray-300: #b3bbc4;
+  --color-gray-400: #8a94a0;
+  --color-gray-500: #55606c;
+  --color-gray-600: #3f4852;
 }
 
 @keyframes dialog-fade {

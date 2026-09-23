@@ -441,7 +441,7 @@ function parseAndamento(xml: string, tag: string): any {
   const nomeUsuario = usuario?.Nome || get("NomeUsuario") || "";
 
   return {
-    Descricao: get("Descricao"),
+    Descricao: stripHtml(get("Descricao")),
     DataHora: get("DataHora"),
     Unidade: unidade || (siglaUnidade ? {
       IdUnidade: "",
@@ -823,22 +823,31 @@ function parseSEIDate(s: string): number {
   return new Date(s).getTime() || 0;
 }
 
-/** Decodifica entidades HTML comuns (&lt; &gt; &amp; &quot; &apos;) */
+/** Decodifica entidades HTML (&lt; &gt; &amp; &quot; &apos; &nbsp; e numéricas), incluindo dupla codificação */
 function decodeHtmlEntities(s: string): string {
   if (!s) return s;
-  return s
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'");
+  let prev = "";
+  let pass = 0;
+  while (prev !== s && pass < 4) {
+    prev = s;
+    s = s
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(Number(code)))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_m, code: string) => String.fromCodePoint(parseInt(code, 16)))
+      .replace(/&amp;/g, "&");
+    pass++;
+  }
+  return s;
 }
 
 /** Remove tags HTML de uma string, preservando só o texto */
 function stripHtml(s: string): string {
   if (!s) return s;
-  return decodeHtmlEntities(s).replace(/<[^>]*>/g, "").trim();
+  return decodeHtmlEntities(s).replace(/<[^>]*>/g, "").replace(/\u200b/g, "").trim();
 }
 
 /**

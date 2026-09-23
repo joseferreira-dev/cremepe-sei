@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { User } from '../types';
 import logoCremepe from '@/imports/logo-cremepe.png';
@@ -42,7 +41,6 @@ interface Props {
 }
 
 export default function Layout({ user, currentPage, onLogout, children }: Props) {
-  const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -59,31 +57,21 @@ export default function Layout({ user, currentPage, onLogout, children }: Props)
     <div className="flex h-full" style={{ fontFamily: "'Inter', sans-serif" }}>
       {/* Sidebar */}
       <aside
-        className="flex flex-col shrink-0 transition-all duration-300"
+        className="flex flex-col shrink-0"
         style={{
-          width: collapsed ? 64 : 240,
+          width: 240,
           background: 'linear-gradient(180deg, #003D26 0%, #006B42 100%)',
         }}
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-4 py-5 border-b border-green-700">
           <img src={logoCremepe} alt="CREMEPE" className="w-8 h-8 object-contain shrink-0" />
-          {!collapsed && (
-            <div className="overflow-hidden">
-              <p className="text-white font-bold text-sm leading-tight" style={{ fontFamily: "'Outfit', sans-serif" }}>
-                CREMEPE SEI
-              </p>
-              <p className="text-green-400 text-xs">Gestão de Processos</p>
-            </div>
-          )}
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="ml-auto text-green-400 hover:text-white transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d={collapsed ? 'M13 5l7 7-7 7M5 5l7 7-7 7' : 'M11 19l-7-7 7-7m8 14l-7-7 7-7'} />
-            </svg>
-          </button>
+          <div className="overflow-hidden">
+            <p className="text-white font-bold text-sm leading-tight" style={{ fontFamily: "'Outfit', sans-serif" }}>
+              CREMEPE SEI
+            </p>
+            <p className="text-green-400 text-xs">Gestão de Processos</p>
+          </div>
         </div>
 
         {/* Nav */}
@@ -95,7 +83,6 @@ export default function Layout({ user, currentPage, onLogout, children }: Props)
                 key={item.path}
                 href={item.path}
                 onClick={(e) => { e.preventDefault(); navigate(item.path); }}
-                title={collapsed ? item.label : undefined}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                   active
                     ? 'text-white'
@@ -104,8 +91,8 @@ export default function Layout({ user, currentPage, onLogout, children }: Props)
                 style={active ? { background: 'rgba(255,255,255,0.15)' } : {}}
               >
                 <span className="shrink-0">{item.icon}</span>
-                {!collapsed && <span className="truncate">{item.label}</span>}
-                {active && !collapsed && (
+                <span className="truncate">{item.label}</span>
+                {active && (
                   <span className="ml-auto w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#8DC63F' }} />
                 )}
               </a>
@@ -115,44 +102,30 @@ export default function Layout({ user, currentPage, onLogout, children }: Props)
 
         {/* User */}
         <div className="p-3 border-t border-green-700">
-          {collapsed ? (
-            <button
-              onClick={onLogout}
-              title="Sair"
-              className="w-full flex items-center justify-center py-2 text-green-400 hover:text-red-300 transition-colors"
+          <button
+            onClick={() => navigate('/profile')}
+            className="flex items-center gap-2 mb-2 w-full text-left hover:bg-white/10 rounded-lg px-1 py-1 transition-colors"
+          >
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+              style={{ background: '#8DC63F' }}
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
-          ) : (
-            <div>
-              <button
-                onClick={() => navigate('/profile')}
-                className="flex items-center gap-2 mb-2 w-full text-left hover:bg-white/10 rounded-lg px-1 py-1 transition-colors"
-              >
-                <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-                  style={{ background: '#8DC63F' }}
-                >
-                  {user.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
-                </div>
-                <div className="overflow-hidden">
-                  <p className="text-white text-xs font-medium truncate">{user.name.split(' ')[0]} {user.name.split(' ').slice(-1)[0]}</p>
-                  <p className="text-green-400 text-xs">{roleLabels[user.role]}</p>
-                </div>
-              </button>
-              <button
-                onClick={onLogout}
-                className="w-full flex items-center gap-2 px-3 py-1.5 rounded text-green-400 hover:text-red-300 hover:bg-red-900/20 transition-all text-xs"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-                Sair
-              </button>
+              {user.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
             </div>
-          )}
+            <div className="overflow-hidden">
+              <p className="text-white text-xs font-medium truncate">{user.name.split(' ')[0]} {user.name.split(' ').slice(-1)[0]}</p>
+              <p className="text-green-400 text-xs">{roleLabels[user.role]}</p>
+            </div>
+          </button>
+          <button
+            onClick={onLogout}
+            className="w-full flex items-center gap-2 px-3 py-1.5 rounded text-green-400 hover:text-red-300 hover:bg-red-900/20 transition-all text-xs"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Sair
+          </button>
         </div>
       </aside>
 

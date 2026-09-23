@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type { User, Process, ProcessStatus, Annotation, Tag } from '../types';
 import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, saveSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listProcessosPai, type ProcessoPai } from '../api';
 import { formatDataPtBR } from '../utils/date';
+import { cleanSeiText } from '../utils/text';
 import { useDialog } from './ui/Dialog';
 
 interface Props {
@@ -456,7 +457,7 @@ export default function ProcessDetails({ user }: Props) {
                   <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Último Andamento</p>
                   {process.ultimoAndamento.descricao ? (
                     <>
-                      <p className="text-sm text-gray-800">{process.ultimoAndamento.descricao}</p>
+                      <p className="text-sm text-gray-800">{cleanSeiText(process.ultimoAndamento.descricao)}</p>
                       <p className="text-xs text-gray-500 mt-0.5">
                         {process.ultimoAndamento.dataHora && formatDataPtBR(process.ultimoAndamento.dataHora, true)}
                         {process.ultimoAndamento.usuario && ` · ${process.ultimoAndamento.usuario}`}
@@ -567,7 +568,7 @@ export default function ProcessDetails({ user }: Props) {
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-700 mt-1 leading-relaxed">{and.descricao}</p>
+                        <p className="text-sm text-gray-700 mt-1 leading-relaxed">{cleanSeiText(and.descricao)}</p>
                       </div>
                     </div>
                   ))}

@@ -75,8 +75,15 @@ export default function NewProcess() {
   const skipped = results.filter((r) => r.status === 'skipped').length;
   const errors = results.filter((r) => r.status === 'error').length;
 
+  const summary = [
+    { label: 'Total', value: results.length, color: '#374151', bg: '#F9FAFB' },
+    { label: 'Importados', value: successes, color: '#065F46', bg: '#D1FAE5' },
+    { label: 'Já Cadastrados', value: skipped, color: '#92400E', bg: '#FEF3C7' },
+    { label: 'Erros', value: errors, color: '#991B1B', bg: '#FEE2E2' },
+  ];
+
   return (
-    <div className="p-8 max-w-6xl" style={{ fontFamily: "'Inter', sans-serif" }}>
+    <div className="p-8" style={{ fontFamily: "'Inter', sans-serif" }}>
       <div className="flex items-center gap-2 text-sm text-gray-500 mb-6">
         <button onClick={() => navigate('/processes')} className="hover:underline" style={{ color: '#009C60' }}>
           Processos
@@ -88,11 +95,11 @@ export default function NewProcess() {
       <h1 className="text-2xl font-bold text-gray-900 mb-1" style={{ fontFamily: "'Outfit', sans-serif" }}>
         Cadastrar Processo
       </h1>
-      <p className="text-gray-500 text-sm mb-8">
+      <p className="text-gray-500 text-sm mb-6">
         Cole os números dos processos no SEI para buscar e importar seus dados automaticamente.
       </p>
 
-      {/* Barra de progresso (acima de tudo) */}
+      {/* Barra de progresso (largura completa) */}
       {running && (
         <div className="bg-white rounded-xl border border-gray-100 p-5 mb-6">
           <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
@@ -111,9 +118,9 @@ export default function NewProcess() {
         </div>
       )}
 
-      <div className="flex gap-6 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6 items-start">
         {/* Coluna esquerda: input */}
-        <div className="flex-1 min-w-0 space-y-4">
+        <div className="min-w-0 space-y-4">
           <div className="bg-white rounded-xl border border-gray-100 p-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Números dos Processos SEI
@@ -131,14 +138,14 @@ export default function NewProcess() {
                 <p className="text-xs font-semibold text-gray-600 mb-2">
                   {detectedNumbers.length} processo(s) detectado(s):
                 </p>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
                   {detectedNumbers.map((num) => {
                     const result = results.find((r) => r.numero === num);
                     const isCurrent = currentImport === num;
                     return (
                       <span
                         key={num}
-                        className="px-2 py-1 text-xs font-mono rounded-md border transition-colors"
+                        className="px-2 py-1 text-xs font-mono rounded-md border transition-colors shrink-0"
                         style={
                           isCurrent
                             ? { color: '#1D4ED8', background: '#DBEAFE', borderColor: '#93C5FD' }
@@ -194,28 +201,27 @@ export default function NewProcess() {
           )}
         </div>
 
-        {/* Coluna direita: resultados */}
-        {results.length > 0 && (
-          <div className="w-96 shrink-0 space-y-4">
-            <div className="space-y-2">
-              {[
-                { label: 'Total', value: results.length, color: '#374151', bg: '#F9FAFB' },
-                { label: 'Importados', value: successes, color: '#065F46', bg: '#D1FAE5' },
-                { label: 'Já Cadastrados', value: skipped, color: '#92400E', bg: '#FEF3C7' },
-                { label: 'Erros', value: errors, color: '#991B1B', bg: '#FEE2E2' },
-              ].map((item) => (
-                <div key={item.label} className="flex items-center justify-between border border-gray-100 rounded-xl px-4 py-3" style={{ background: item.bg }}>
-                  <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">{item.label}</p>
-                  <p className="text-xl font-bold" style={{ color: item.color, fontFamily: "'Outfit', sans-serif" }}>{item.value}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
-                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Resultado</p>
+        {/* Coluna direita: resultados (sempre presente para manter o layout estável) */}
+        <div className="min-w-0 space-y-4">
+          <div className="space-y-2">
+            {summary.map((item) => (
+              <div key={item.label} className="flex items-center justify-between border border-gray-100 rounded-xl px-4 py-3" style={{ background: item.bg }}>
+                <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">{item.label}</p>
+                <p className="text-xl font-bold" style={{ color: item.color, fontFamily: "'Outfit', sans-serif" }}>{item.value}</p>
               </div>
-              <div className="divide-y divide-gray-50 max-h-[480px] overflow-y-auto">
+            ))}
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Resultado</p>
+            </div>
+            {results.length === 0 ? (
+              <p className="px-4 py-10 text-center text-sm text-gray-400">
+                Nenhum processo importado ainda.
+              </p>
+            ) : (
+              <div className="divide-y divide-gray-100 max-h-[300px] overflow-y-auto">
                 {[...results].reverse().map((r) => (
                   <div key={r.numero} className="px-4 py-3">
                     <div className="flex items-center justify-between mb-1">
@@ -237,9 +243,9 @@ export default function NewProcess() {
                   </div>
                 ))}
               </div>
-            </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

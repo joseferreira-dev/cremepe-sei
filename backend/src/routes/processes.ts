@@ -167,7 +167,11 @@ async function syncProcesso(procId: string): Promise<SyncResult> {
   // Auto-import removed — related processes are shown but not imported into the DB
 
   if (!andamentoMudou && !paiFinalizado && andamentosSync.length === 0 && concluido === (proc.statusSistema === "finalizado")) {
-    return { status: "skipped", mensagem: "Sem alterações.", autoImportados };
+    await prisma.process.update({
+      where: { id: proc.id },
+      data: { sincronizadoEm: new Date() },
+    });
+    return { status: "success", mensagem: "Sincronizado. Sem alterações.", autoImportados };
   }
 
   await prisma.process.update({
@@ -907,7 +911,7 @@ router.post("/:id/sync", async (req: Request, res: Response) => {
         status: result.status === "error" ? "error" : "success",
         mensagem: result.status === "error"
           ? `Erro ao sincronizar: ${result.mensagem}`
-          : `Sincronização manual concluída. 1 processo ${result.status === "skipped" ? "sem alterações" : "atualizado"}.`,
+          : `Sincronização manual concluída. 1 processo sincronizado.`,
       },
     });
 
