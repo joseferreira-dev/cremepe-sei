@@ -24,8 +24,16 @@ Sistema de Gestão Inteligente de Processos do **CREMEPE** (Conselho Regional de
 │   └── package.json     # Dependências e scripts do backend
 │
 ├── .env                 # Credenciais SEI + LLM (raiz)
+├── FLUXOS.md            # Documentação detalhada de todos os fluxos do sistema
 └── README.md
 ```
+
+## Documentação
+
+- **[`FLUXOS.md`](./FLUXOS.md)** — todos os fluxos do sistema em detalhe: autenticação (local/AD), permissões, cadastro e importação, sincronização com o SEI, resumo com IA, anotações, tags, dashboard, relatórios, administração, mapa de rotas e tabela completa de endpoints.
+- **[`frontend/src/imports/ESPECIFICACAO.md`](./frontend/src/imports/ESPECIFICACAO.md)** — especificação original de planejamento (alguns pontos divergem da implementação atual; veja a nota no topo do arquivo).
+
+> A API usa **endpoints em português** (`/api/autenticacao`, `/api/processos`, `/api/etiquetas`, `/api/administracao`, `/api/sei`) e as rotas do frontend também (`/processos`, `/relatorios`, `/sincronizacao`...). Após mudanças de rota, reinicie backend e frontend.
 
 ## Pré-requisitos
 
@@ -151,14 +159,16 @@ pnpm preview      # serve o build (porta 8443 por padrão)
 
 ## Funcionalidades
 
-- **Autenticação JWT** com perfis (admin, protocolo, analista, gestor)
-- **Consulta e importação de processos** do SEI via WebService SOAP (`consultarProcedimento`)
-- **Importação em lote** de números de processo
-- **Resumos executivos gerados por IA** a partir de documentos (PDF, DOCX, ODT, imagens)
-- **Tags** para categorização de processos
-- **Anotações** por usuário
-- **Dashboard e relatórios** com gráficos
-- **Administração** de usuários, logs de sincronização e configurações SEI
+- **Autenticação JWT** em dois modos: **local** (bcrypt) e **Active Directory** (LDAP); o primeiro login AD cria o usuário e sincroniza suas unidades SEI
+- **Perfis com controle de acesso**: admin (tudo), analista (vê tudo, com mascaramento de processos Restritos fora de suas unidades) e assistente (apenas suas unidades)
+- **Cadastro de processos** via WebService SOAP do SEI (`consultarProcedimento`), com importação de vários números colados de uma vez
+- **Sincronização** individual e em lote (concorrência de 5), com cascata de unidades, detecção de conclusão e herança de status de processos pai
+- **Resumos executivos gerados por IA** (Google Gemini, com fallback de modelos) a partir de documentos (PDF, DOCX, ODT, planilhas, texto manual)
+- **Tags** para categorização e **anotações** por usuário (edição apenas do autor)
+- **Processos parados**: em andamento sem movimentação recente (exclui filhos anexados)
+- **Dashboard** com período configurável (padrão: últimos 6 meses), KPIs e gráficos (evolução, últimos processos, unidades, top tipos)
+- **Relatórios** com filtros, gráficos e exportação em **CSV, PDF e XLSX**
+- **Administração** (apenas admin): usuários, unidades por usuário e registros de sincronização
 
 ## Notas
 

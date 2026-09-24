@@ -1,6 +1,13 @@
 # Especificação do Sistema **CREMEPE SEI**  
 Sistema Web para Gestão Inteligente de Processos no SEI  
 
+> **Nota sobre o estado atual**: este é o documento de **planejamento original**. A
+> implementação difere em alguns pontos da stack prevista aqui (stack real: React +
+> Vite + **Tailwind CSS**, Express + **SQLite** via Prisma, **Recharts**, sem
+> Docker/node-cron/React Query; sincronização é sob demanda, não agendada). Para o
+> comportamento **efetivo do sistema**, consulte [`FLUXOS.md`](../../../FLUXOS.md)
+> na raiz do repositório — todos os fluxos, permissões, rotas e endpoints atuais.
+
 ---
 
 ## Sumário
@@ -16,7 +23,7 @@ Sistema Web para Gestão Inteligente de Processos no SEI
 9. [Especificação das Telas (UI)](#9-especificação-das-telas-ui)  
 10. [Integração com o SEI – WebService SOAP](#10-integração-com-o-sei--webservice-soap)  
 11. [Integração com IA – Google Gemini](#11-integração-com-ia--google-gemini)  
-12. [API Backend (Node.js) – Endpoints Planejados](#12-api-backend-nodejs--endpoints-planejados)  
+12. [API Backend (Node.js) – Endpoints Implementados](#12-api-backend-nodejs--endpoints-implementados)  
 13. [Segurança e Autenticação](#13-segurança-e-autenticação)  
 14. [Plano de Implementação e Próximos Passos](#14-plano-de-implementação-e-próximos-passos)  
 
@@ -280,7 +287,7 @@ A seguir, a descrição detalhada de cada tela do sistema.
 
 **Interações**:
 - Validação em tempo real (e-mail válido, senha não vazia).
-- Ao submeter, chama API `/auth/login`.
+- Ao submeter, chama API `/autenticacao/login`.
 - Em caso de erro, exibe mensagem abaixo do formulário.
 
 ---
@@ -562,39 +569,67 @@ async function gerarResumo(texto) {
 
 ---
 
-## 12. API Backend (Node.js) – Endpoints Planejados
+## 12. API Backend (Node.js) – Endpoints Implementados
+
+> Endpoints **em português** (base `http://127.0.0.1:8000/api`). Todos exigem
+> `Authorization: Bearer <JWT>`, exceto o login. Tabela completa com observações em
+> [`FLUXOS.md`](../../../FLUXOS.md#20-tabela-completa-de-endpoints).
+
+### 12.1. Autenticação (`/api/autenticacao`)
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| POST | `/auth/login` | Autenticação → JWT |
-| POST | `/auth/logout` | Logout (invalida token no client) |
-| GET | `/auth/me` | Retorna dados do usuário logado |
-| GET | `/processes` | Lista processos (com paginação, filtros) |
-| GET | `/processes/:id` | Detalhes de um processo |
-| POST | `/processes` | Cadastra um novo processo (manual) |
-| POST | `/processes/import` | Importa em lote (upload CSV) |
-| PUT | `/processes/:id` | Atualiza dados do processo (status, tags) |
-| POST | `/processes/:id/sync` | Sincroniza com SEI (consulta e atualiza) |
-| DELETE | `/processes/:id` | Exclui processo (admin) |
-| POST | `/processes/:id/resumo` | Gera resumo via IA (upload de arquivos) |
-| GET | `/processes/:id/resumo` | Obtém o resumo gerado |
-| POST | `/processes/:id/annotations` | Adiciona anotação |
-| GET | `/processes/:id/annotations` | Lista anotações |
-| DELETE | `/annotations/:id` | Exclui anotação |
-| GET | `/tags` | Lista tags |
-| POST | `/tags` | Cria tag |
-| PUT | `/tags/:id` | Atualiza tag |
-| DELETE | `/tags/:id` | Exclui tag |
-| GET | `/unidades` | Lista unidades (cache do SEI) |
-| GET | `/tipos` | Lista tipos de processo (cache) |
-| POST | `/admin/users` | Cria usuário (admin) |
-| GET | `/admin/users` | Lista usuários |
-| PUT | `/admin/users/:id` | Atualiza usuário |
-| DELETE | `/admin/users/:id` | Exclui usuário |
-| GET | `/admin/config` | Obtém configurações SEI |
-| PUT | `/admin/config` | Atualiza configurações |
-| POST | `/admin/sync-all` | Dispara sincronização em lote (manual) |
-| GET | `/reports` | Gera relatório (filtros) |
+| POST | `/login` | Autenticação (local ou AD/LDAP) → JWT |
+| GET | `/usuario-atual` | Retorna dados do usuário logado |
+| GET | `/perfil` | Perfil completo + unidades vinculadas |
+| PUT | `/perfil` | Altera o nome (somente usuários locais) |
+| POST | `/sincronizar-unidades` | Refaz as unidades SEI do usuário |
+| GET | `/sei-unidades` | Unidades CREMEPE do SEI (cache) |
+
+### 12.2. Processos (`/api/processos`)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| GET | `/` | Lista processos (paginação + filtros) |
+| GET | `/parados` | Processos em andamento sem movimentação |
+| POST | `/` | Cadastra processo (consulta SEI por número) |
+| POST | `/importar` | Importação em lote (concorrência 5) |
+| POST | `/sincronizar-lote` | Sincronização em lote (concorrência 5) |
+| GET | `/:id` | Detalhes de um processo |
+| PUT | `/:id` | Atualiza status e/ou tags (`tagIds`) |
+| DELETE | `/:id` | Exclui processo (admin) |
+| POST | `/:id/sincronizar` | Sincroniza com o SEI |
+| GET | `/:id/andamentos` | Andamentos ao vivo do SEI |
+| GET | `/:id/pais` | Processos que anexam este (busca reversa) |
+| POST | `/:id/resumo` | Gera resumo com IA (multipart: arquivos e/ou texto) — preview |
+| POST | `/:id/resumo/save` | Salva o resumo gerado |
+| GET | `/:id/resumo` | Retorna o resumo salvo |
+| GET/POST | `/:id/anotacoes` | Lista / cria anotação |
+| PUT/DELETE | `/:id/anotacoes/:anotacaoId` | Editar (autor) / excluir (autor ou admin) |
+
+### 12.3. Etiquetas (`/api/etiquetas`)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| GET/POST | `/` | Lista / cria tag |
+| PUT/DELETE | `/:id` | Atualiza / exclui tag |
+
+### 12.4. Administração (`/api/administracao` — somente admin)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| GET/POST | `/usuarios` | Lista / cria usuário |
+| PUT/DELETE | `/usuarios/:id` | Atualiza / exclui usuário |
+| POST | `/usuarios/:id/sincronizar-unidades` | Refaz as unidades de um usuário |
+| GET | `/registros` | 100 últimos registros de sincronização |
+| GET/PUT | `/configuracoes` | Configurações chave/valor |
+
+### 12.5. SEI e utilitários
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| GET | `/sei/unidades` | Unidades CREMEPE do SEI (cache 5 min) |
+| GET | `/saude` | Health check |
 
 ---
 
