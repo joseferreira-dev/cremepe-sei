@@ -5,6 +5,8 @@ import { getProcess, listAnnotations, createAnnotation, updateAnnotation, delete
 import { formatDataPtBR } from '../utils/date';
 import { cleanSeiText } from '../utils/text';
 import { useDialog } from './ui/Dialog';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface Props {
   user: User;
@@ -18,6 +20,54 @@ const statusConfig: Record<ProcessStatus, { label: string; color: string; bg: st
 };
 
 const anotacaoLimit = 5;
+
+interface UnidadeLista {
+  sigla: string;
+  descricao: string;
+  aberta: boolean;
+}
+
+/** Altura (px) necessária para exibir até 5 unidades — usada como limite de scroll. */
+function alturaCincoUnidades(unidades: UnidadeLista[]): number {
+  const cinco = unidades.slice(0, 5);
+  return cinco.reduce((sum, u, i) => sum + (u.descricao ? 54 : 38) + (i > 0 ? 8 : 0), 0) + 4;
+}
+
+function UnidadesLista({ unidades, altura }: { unidades: UnidadeLista[]; altura: number }) {
+  if (unidades.length === 0) return <p className="text-sm text-gray-400">—</p>;
+  return (
+    <div
+      className="flex flex-col gap-2 overflow-y-auto pr-1"
+      style={unidades.length > 5 ? { maxHeight: `${altura}px` } : undefined}
+    >
+      {unidades.map((u) => (
+        <div
+          key={`${u.aberta ? 'aberta' : 'historica'}-${u.sigla}`}
+          className="rounded-lg border px-3 py-2"
+          style={
+            u.aberta
+              ? { background: '#ECFDF5', borderColor: '#A7F3D0' }
+              : { background: '#F9FAFB', borderColor: '#F3F4F6' }
+          }
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: u.aberta ? '#009C60' : '#9CA3AF' }} />
+            <p className="text-sm font-semibold text-gray-800">{u.sigla}</p>
+            {u.aberta && (
+              <span
+                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                style={{ color: '#006B42', background: '#D1FAE5' }}
+              >
+                Aberta
+              </span>
+            )}
+          </div>
+          {u.descricao && <p className="text-xs text-gray-500 mt-0.5">{u.descricao}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function ProcessDetails({ user }: Props) {
   const { id: processId } = useParams<{ id: string }>();
@@ -49,6 +99,7 @@ export default function ProcessDetails({ user }: Props) {
   const [paisLoading, setPaisLoading] = useState(false);
   const [showAllAnotacoes, setShowAllAnotacoes] = useState(false);
   const [showAndamentosDialog, setShowAndamentosDialog] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
     if (!processId) { setNotFound(true); return; }
@@ -250,23 +301,284 @@ export default function ProcessDetails({ user }: Props) {
     }
   };
 
-  const unidadesDiretas = (
-    process.unidades.length > 0 ? process.unidades : process.unidadeAtual?.sigla ? [process.unidadeAtual] : []
-  ).filter((u) => u && u.sigla);
-  const unidadesExibiveis =
-    unidadesDiretas.length > 0
-      ? unidadesDiretas
-      : Array.from(
-          new Map(
-            process.andamentos
-              .map((a) => a.unidade)
-              .filter(Boolean)
-              .map((sigla) => [sigla, { id: '', sigla, descricao: '' }]),
-          ).values(),
-        );
-  const unidadesDeHistorico = unidadesDiretas.length === 0 && unidadesExibiveis.length > 0;
+  // Unidades unificadas: em processos em andamento, as abertas vêm em verde e as
+  // históricas (por onde passou e não está mais aberto) em cinza; finalizadas, tudo cinza.
+  const unidadesUnificadas: UnidadeLista[] = [];
+  const unidadesJaListadas = new Set<string>();
+  const addUnidade = (sigla: string | undefined, descricao: string | undefined, aberta: boolean) => {
+    const s = (sigla || '').trim();
+    if (!s || unidadesJaListadas.has(s)) return;
+    unidadesJaListadas.add(s);
+    unidadesUnificadas.push({ sigla: s, descricao: (descricao || '').trim(), aberta });
+  };
+  if (process.status === 'em_andamento') {
+    for (const u of process.unidades) addUnidade(u?.sigla, u?.descricao, true);
+    addUnidade(process.unidadeAtual?.sigla, process.unidadeAtual?.descricao, true);
+  } else {
+    for (const u of process.unidades) addUnidade(u?.sigla, u?.descricao, false);
+  }
+  for (const a of process.andamentos) addUnidade(a.unidade, '', false);
 
   const anotacoesVisiveis = showAllAnotacoes ? annotations : annotations.slice(0, anotacaoLimit);
+
+  const handleExportPdf = () => {
+    if (!process) return;
+    setExportingPdf(true);
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const M = 14;
+      const GREEN: [number, number, number] = [0, 156, 96];
+      const generatedAt = new Date().toLocaleString('pt-BR');
+      const dash = '—';
+      let y = 0;
+
+      const lastFinalY = (): number | undefined => {
+        // jspdf-autotable v5 grava a última tabela (e finalY) em doc.lastAutoTable
+        const t = (doc as any).lastAutoTable;
+        return typeof t === 'object' && t !== null ? (t.finalY as number | undefined) : undefined;
+      };
+
+      const ensureSpace = (h: number) => {
+        if (y + h > pageH - 20) {
+          doc.addPage();
+          y = M + 4;
+        }
+      };
+
+      const sectionTitle = (title: string) => {
+        ensureSpace(16);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(...GREEN);
+        doc.text(title, M, y);
+        doc.setDrawColor(225);
+        doc.line(M, y + 1.8, pageW - M, y + 1.8);
+        doc.setTextColor(40);
+        y += 7;
+      };
+
+      const kvTable = (rows: string[][]) => {
+        autoTable(doc, {
+          head: [['Campo', 'Detalhe']],
+          body: rows,
+          startY: y,
+          margin: { top: M + 10, left: M, right: M, bottom: 16 },
+          styles: { fontSize: 9.5, cellPadding: 2, overflow: 'linebreak' },
+          headStyles: { fillColor: GREEN, textColor: 255, fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [245, 248, 246] },
+          columnStyles: { 0: { cellWidth: 42, fontStyle: 'bold' } },
+        });
+        y = (lastFinalY() ?? y) + 7;
+      };
+
+      const paragraph = (text: string, size = 10) => {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(size);
+        doc.setTextColor(40);
+        const lineH = size * 0.42;
+        const lines: string[] = doc.splitTextToSize(text, pageW - 2 * M);
+        for (const line of lines) {
+          ensureSpace(lineH + 2);
+          doc.text(line, M, y);
+          y += lineH;
+        }
+        y += 3;
+      };
+
+      // ---- Banner ----
+      doc.setFillColor(...GREEN);
+      doc.rect(0, 0, pageW, 26, 'F');
+      doc.setTextColor(255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.text('CREMEPE SEI — Panorama Geral do Processo', M, 12);
+      doc.setFontSize(16);
+      doc.text(process.numeroSei, pageW - M, 12, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.text(`Gerado em ${generatedAt}${user?.name ? ` · ${user.name}` : ''}`, M, 19);
+      doc.text(`Status: ${cfg.label}`, pageW - M, 19, { align: 'right' });
+      y = 36;
+
+      // ---- Identificação ----
+      sectionTitle('Identificação');
+      kvTable([
+        ['Status', cfg.label],
+        ['Tipo', cleanSeiText(process.tipo) || dash],
+        ['Especificação', cleanSeiText(process.especificacao) || dash],
+        ['Data de autuação', process.dataAutuacao ? formatDataPtBR(process.dataAutuacao) : dash],
+        ['Nível de acesso', process.nivelAcesso || dash],
+        [
+          'Unidade atual',
+          process.unidadeAtual?.sigla
+            ? `${process.unidadeAtual.sigla}${process.unidadeAtual.descricao ? ` — ${process.unidadeAtual.descricao}` : ''}`
+            : dash,
+        ],
+        [
+          'Unidades',
+          unidadesUnificadas.length > 0
+            ? unidadesUnificadas
+                .map((u) => `${u.sigla}${u.descricao ? ` — ${u.descricao}` : ''}${u.aberta ? ' (aberta)' : ''}`)
+                .join('; ')
+            : dash,
+        ],
+        ['Tags', process.tags.length > 0 ? process.tags.map((t) => t.name).join(', ') : dash],
+        ['Última sincronização', process.sincronizadoEm ? formatDataPtBR(process.sincronizadoEm, true) : dash],
+        ['Link SEI', process.linkSei || dash],
+        ['Cadastrado em', formatDataPtBR(process.createdAt, true)],
+      ]);
+
+      // ---- Resumo IA ----
+      sectionTitle('Resumo IA');
+      if (process.resumoIa && process.resumoIa.trim()) {
+        if (process.resumoGeradoEm) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8.5);
+          doc.setTextColor(120);
+          doc.text(`Gerado em ${formatDataPtBR(process.resumoGeradoEm, true)}`, M, y);
+          y += 5;
+        }
+        paragraph(cleanSeiText(process.resumoIa));
+      } else {
+        paragraph('Nenhum resumo gerado para este processo.', 10);
+      }
+
+      // ---- Último andamento ----
+      sectionTitle('Último Andamento');
+      const ultimo = process.ultimoAndamento;
+      kvTable([
+        ['Data / Hora', ultimo?.dataHora ? formatDataPtBR(ultimo.dataHora, true) : dash],
+        ['Usuário', cleanSeiText(ultimo?.usuario) || dash],
+        ['Unidade', cleanSeiText(ultimo?.unidade) || dash],
+        ['Descrição', cleanSeiText(ultimo?.descricao) || dash],
+      ]);
+
+      // ---- Assuntos e interessados ----
+      sectionTitle('Assuntos e Interessados');
+      kvTable([
+        [
+          'Assuntos',
+          process.assuntos.length > 0 ? process.assuntos.map((a) => cleanSeiText(a)).filter(Boolean).join('; ') || dash : dash,
+        ],
+        [
+          'Interessados',
+          process.interessados.length > 0
+            ? process.interessados.map((i) => cleanSeiText(i)).filter(Boolean).join('; ') || dash
+            : dash,
+        ],
+      ]);
+
+      // ---- Andamentos ----
+      sectionTitle(`Histórico de Andamentos (${process.andamentos.length})`);
+      if (process.andamentos.length > 0) {
+        autoTable(doc, {
+          head: [['Data / Hora', 'Unidade', 'Usuário', 'Descrição']],
+          body: process.andamentos.map((a) => [
+            a.dataHora ? formatDataPtBR(a.dataHora, true) : dash,
+            cleanSeiText(a.unidade) || dash,
+            cleanSeiText(a.usuario) || dash,
+            cleanSeiText(a.descricao) || dash,
+          ]),
+          startY: y,
+          margin: { top: M + 10, left: M, right: M, bottom: 16 },
+          styles: { fontSize: 8.5, cellPadding: 1.8, overflow: 'linebreak', valign: 'top' },
+          headStyles: { fillColor: GREEN, textColor: 255, fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [245, 248, 246] },
+          columnStyles: {
+            0: { cellWidth: 26 },
+            1: { cellWidth: 20 },
+            2: { cellWidth: 26 },
+          },
+        });
+        y = (lastFinalY() ?? y) + 7;
+      } else {
+        paragraph('Nenhum andamento registrado.', 10);
+      }
+
+      // ---- Anotações ----
+      sectionTitle(`Anotações (${annotations.length})`);
+      if (annotations.length > 0) {
+        autoTable(doc, {
+          head: [['Data', 'Autor', 'Anotação']],
+          body: annotations.map((a) => [
+            formatDataPtBR(a.createdAt, true),
+            a.userName || dash,
+            a.content || dash,
+          ]),
+          startY: y,
+          margin: { top: M + 10, left: M, right: M, bottom: 16 },
+          styles: { fontSize: 8.5, cellPadding: 1.8, overflow: 'linebreak', valign: 'top' },
+          headStyles: { fillColor: GREEN, textColor: 255, fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [245, 248, 246] },
+          columnStyles: {
+            0: { cellWidth: 26 },
+            1: { cellWidth: 32 },
+          },
+        });
+        y = (lastFinalY() ?? y) + 7;
+      } else {
+        paragraph('Nenhuma anotação registrada.', 10);
+      }
+
+      // ---- Relacionados / anexados / pais ----
+      const anexadosNumeros = new Set(process.procedimentosAnexados.map((p) => p.numero));
+      const relRows: string[][] = [];
+      for (const r of process.procedimentosRelacionados) {
+        if (anexadosNumeros.has(r.numero)) continue;
+        relRows.push(['Relacionado', r.numero, cleanSeiText(r.tipo) || dash]);
+      }
+      for (const a of process.procedimentosAnexados) {
+        relRows.push(['Anexado', a.numero, cleanSeiText(a.tipo) || dash]);
+      }
+      for (const p of processosPai) {
+        relRows.push([
+          'Processo pai',
+          p.numero,
+          `${cleanSeiText(p.tipo || '')}${p.statusSistema === 'finalizado' ? ' · finalizado' : ''}`.trim() || dash,
+        ]);
+      }
+      sectionTitle('Processos Relacionados');
+      if (relRows.length > 0) {
+        autoTable(doc, {
+          head: [['Relação', 'Número', 'Detalhe']],
+          body: relRows,
+          startY: y,
+          margin: { top: M + 10, left: M, right: M, bottom: 16 },
+          styles: { fontSize: 9, cellPadding: 2, overflow: 'linebreak' },
+          headStyles: { fillColor: GREEN, textColor: 255, fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [245, 248, 246] },
+          columnStyles: {
+            0: { cellWidth: 30, fontStyle: 'bold' },
+            1: { cellWidth: 45 },
+          },
+        });
+        y = (lastFinalY() ?? y) + 7;
+      } else {
+        paragraph('Nenhum processo relacionado, anexado ou pai.', 10);
+      }
+
+      // ---- Rodapé em todas as páginas ----
+      const pages = doc.getNumberOfPages();
+      for (let i = 1; i <= pages; i++) {
+        doc.setPage(i);
+        doc.setDrawColor(230);
+        doc.line(M, pageH - 12, pageW - M, pageH - 12);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(140);
+        doc.text(`Gerado em ${generatedAt}`, M, pageH - 7.5);
+        doc.text(`Página ${i} de ${pages} · CREMEPE SEI`, pageW - M, pageH - 7.5, { align: 'right' });
+      }
+
+      doc.save(`panorama-processo-${process.numeroSei}.pdf`);
+    } catch (e: any) {
+      dialog.error(e?.message || 'Erro ao gerar o PDF.');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   return (
     <div className="p-8 space-y-6" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -337,6 +649,17 @@ export default function ProcessDetails({ user }: Props) {
             {!acessoRestrito && (
               <>
                 <button
+                  onClick={handleExportPdf}
+                  disabled={exportingPdf}
+                  title="Exportar panorama geral do processo em PDF"
+                  className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  {exportingPdf ? 'Gerando…' : 'Exportar PDF'}
+                </button>
+                <button
                   onClick={handleSync}
                   disabled={syncLoading}
                   className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60"
@@ -371,17 +694,7 @@ export default function ProcessDetails({ user }: Props) {
           </p>
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Unidades</p>
-            <div className="flex flex-col gap-1">
-              {unidadesExibiveis.length > 0 ? (
-                unidadesExibiveis.map((u) => (
-                  <p key={u.sigla} className="text-sm font-semibold text-gray-800">
-                    {u.sigla} <span className="font-normal text-gray-500">{u.descricao}</span>
-                  </p>
-                ))
-              ) : (
-                <span className="text-xs text-gray-400">—</span>
-              )}
-            </div>
+            <UnidadesLista unidades={unidadesUnificadas} altura={alturaCincoUnidades(unidadesUnificadas)} />
           </div>
         </div>
       )}
@@ -408,20 +721,8 @@ export default function ProcessDetails({ user }: Props) {
                   )}
                 </InfoCard>
 
-                <InfoCard title={process.status === 'em_andamento' ? 'Unidades onde está aberto' : 'Unidades'}>
-                  {unidadesExibiveis.length > 0 ? (
-                    <div className="flex flex-col gap-2">
-                      {unidadesDeHistorico && (
-                        <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Por onde o processo passou</p>
-                      )}
-                      {unidadesExibiveis.map((u) => (
-                        <div key={u.sigla + (u.id || '')} className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
-                          <p className="text-sm font-semibold text-gray-800">{u.sigla}</p>
-                          {u.descricao && <p className="text-xs text-gray-500">{u.descricao}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  ) : <p className="text-sm text-gray-400">—</p>}
+                <InfoCard title="Unidades">
+                  <UnidadesLista unidades={unidadesUnificadas} altura={alturaCincoUnidades(unidadesUnificadas)} />
                 </InfoCard>
               </div>
 
