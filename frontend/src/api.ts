@@ -185,6 +185,7 @@ export async function listProcesses(params: {
   unit?: string;
   resumo?: string;
   andamentos?: string;
+  documentos?: string;
   tipo?: string;
   nivelAcesso?: string;
   dateFrom?: string;
@@ -198,6 +199,7 @@ export async function listProcesses(params: {
   if (params.unit && params.unit !== 'all') qs.set('unit', params.unit);
   if (params.resumo && params.resumo !== 'all') qs.set('resumo', params.resumo);
   if (params.andamentos && params.andamentos !== 'all') qs.set('andamentos', params.andamentos);
+  if (params.documentos && params.documentos !== 'all') qs.set('documentos', params.documentos);
   if (params.tipo && params.tipo !== 'all') qs.set('tipo', params.tipo);
   if (params.nivelAcesso && params.nivelAcesso !== 'all') qs.set('nivelAcesso', params.nivelAcesso);
   if (params.dateFrom) qs.set('dateFrom', params.dateFrom);
@@ -213,6 +215,30 @@ export async function listProcesses(params: {
     total: data.pagination?.total ?? 0,
     totalPages: data.pagination?.totalPages ?? 1,
   };
+}
+
+export interface StalledProcess {
+  id: string;
+  numeroSei: string;
+  especificacao: string;
+  dataAutuacao: string;
+  nivelAcesso: string;
+  unidadeAtual: { id: string; sigla: string; descricao: string };
+  unidades: { id: string; sigla: string; descricao: string }[];
+  tags: Tag[];
+  ultimoAndamento: { descricao: string; dataHora: string; usuario: string; unidade: string } | null;
+  diasParado: number | null;
+  ultimaAtividade: string | null;
+}
+
+export async function listStalledProcesses(): Promise<StalledProcess[]> {
+  const data = await request<{ processes: any[] }>('/processes/stalled');
+  return (data.processes || []).map((p) => ({
+    ...p,
+    unidadeAtual: p.unidadeAtual || {},
+    unidades: p.unidades || [],
+    tags: p.tags || [],
+  }));
 }
 
 export async function getProcess(id: string): Promise<Process> {

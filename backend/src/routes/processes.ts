@@ -255,15 +255,21 @@ router.get("/", async (req: Request, res: Response) => {
     }
 
     if (status && status !== "all") {
-      where.statusSistema = status;
+      // Frontend normaliza "em_analise" → "em_andamento"; aceita os dois no banco
+      where.statusSistema =
+        status === "em_andamento"
+          ? { in: ["em_andamento", "em_analise"] }
+          : status;
     }
 
     if (unit && unit !== "all") {
-      where.OR = [
-        ...(where.OR || []),
-        { unidadeAtual: { contains: `"sigla":"${unit}"` } },
-        { unidades: { contains: `"sigla":"${unit}"` } },
-      ];
+      // Aceita una sigla ou lista comma-separated ("SIGLA1,SIGLA2")
+      const unitList = unit.split(",").map((s) => s.trim()).filter(Boolean);
+      const unitConditions = unitList.flatMap((u) => [
+        { unidadeAtual: { contains: `"sigla":"${u}"` } },
+        { unidades: { contains: `"sigla":"${u}"` } },
+      ]);
+      where.OR = [...(where.OR || []), ...unitConditions];
     }
 
     if (resumo === "1") {
@@ -276,6 +282,17 @@ router.get("/", async (req: Request, res: Response) => {
     if (andamentos === "0") {
       // andamentos é String não-nullable no schema, então NULL nunca existe no banco
       where.andamentos = "[]";
+    }
+
+    const documentos = req.query.documentos as string | undefined;
+    if (documentos === "0") {
+      const docFilter = { not: { contains: "Documento" } };
+      if (where.andamentos !== undefined) {
+        where.AND = [...(where.AND || []), { andamentos: docFilter }];
+        delete where.andamentos;
+      } else {
+        where.andamentos = docFilter;
+      }
     }
 
     if (tipo && tipo !== "all") {
@@ -379,6 +396,100 @@ router.get("/", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("[PROCESSES] List error:", error);
     res.status(500).json({ error: "Erro ao listar processos." });
+  }
+});
+
+// List stalled processes (em_andamento with no recent activity)
+router.get("/stalled", async (req: Request, res: Response) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    const userRole = user?.role || "assistente";
+    const userUnits = await prisma.userUnit.findMany({ where: { userId: req.user!.userId } });
+    const userUnitSiglas = userUnits.map((u) => u.unitSigla);
+
+    const where: any = { statusSistema: "em_andamento" };
+
+    if (userRole === "assistente") {
+      if (userUnitSiglas.length === 0) {
+        return res.json({ processes: [] });
+      }
+      where.OR = userUnitSiglas.map((sigla) => ({
+        unidades: { contains: `"sigla":"${sigla}"` },
+      }));
+    }
+
+    const processes = await prisma.process.findMany({
+      where,
+      include: {
+        tags: { include: { tag: true } },
+      },
+    });
+
+    // Exclui processos anexados a outro (filhos) — o processo pai é quem recebe novos andamentos
+    const allAnexados = await prisma.process.findMany({
+      select: { procedimentosAnexados: true },
+    });
+    const filhos = new Set<string>();
+    for (const p of allAnexados) {
+      try {
+        const anexados = JSON.parse(p.procedimentosAnexados || "[]");
+        for (const a of anexados) {
+          if (a?.numero) filhos.add(a.numero);
+        }
+      } catch { /* ignora JSON inválido */ }
+    }
+
+    const now = Date.now();
+
+    function parseDataHora(v: string): Date | null {
+      if (!v) return null;
+      // DD/MM/YYYY HH:mm:ss or DD/MM/YYYY
+      const br = v.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+      if (br) {
+        const d = new Date(`${br[3]}-${br[2]}-${br[1]}T${br[4] || '00'}:${br[5] || '00'}:${br[6] || '00'}`);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      // ISO format
+      const iso = new Date(v);
+      return isNaN(iso.getTime()) ? null : iso;
+    }
+
+    const stalled = processes
+      .map((p) => {
+        const andamentos = JSON.parse(p.andamentos || "[]");
+        let lastActivity: Date | null = null;
+        if (andamentos.length > 0) {
+          const sorted = [...andamentos].sort((a: any, b: any) => {
+            const da = parseDataHora(a.dataHora)?.getTime() ?? 0;
+            const db = parseDataHora(b.dataHora)?.getTime() ?? 0;
+            return db - da;
+          });
+          lastActivity = parseDataHora(sorted[0].dataHora);
+        }
+        const diasParado = lastActivity
+          ? Math.max(0, Math.floor((now - lastActivity.getTime()) / (1000 * 60 * 60 * 24)))
+          : null;
+        return {
+          id: p.id,
+          numeroSei: p.numeroSei,
+          especificacao: p.especificacao,
+          dataAutuacao: p.dataAutuacao,
+          nivelAcesso: p.nivelAcesso,
+          unidadeAtual: JSON.parse(p.unidadeAtual || "{}"),
+          unidades: JSON.parse(p.unidades || "[]"),
+          tags: p.tags.map((t) => ({ id: t.tag.id, name: t.tag.name, color: t.tag.color })),
+          ultimoAndamento: andamentos.length > 0 ? andamentos[0] : null,
+          diasParado,
+          ultimaAtividade: lastActivity ? lastActivity.toISOString() : null,
+        };
+      })
+      .filter((p) => p.diasParado !== null && !filhos.has(p.numeroSei))
+      .sort((a, b) => (b.diasParado ?? 0) - (a.diasParado ?? 0));
+
+    res.json({ processes: stalled });
+  } catch (error: any) {
+    console.error("[PROCESSES] Stalled list error:", error);
+    res.status(500).json({ error: "Erro ao listar processos parados." });
   }
 });
 

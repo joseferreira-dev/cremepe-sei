@@ -10,6 +10,7 @@ import TagsManager from './components/TagsManager';
 import Admin from './components/Admin';
 import Reports from './components/Reports';
 import SyncPage from './components/SyncPage';
+import StalledProcesses from './components/StalledProcesses';
 import Profile from './components/Profile';
 import { DialogProvider } from './components/ui/Dialog';
 import type { User } from './types';
@@ -21,7 +22,7 @@ function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User)
 
   useEffect(() => {
     // Redireciona para dashboard se a URL não existe
-    const validPaths = ['/', '/processes', '/processes/sem-resumo', '/new-process', '/tags', '/reports', '/sync', '/admin', '/profile'];
+    const validPaths = ['/', '/processes', '/processes/sem-resumo', '/new-process', '/tags', '/reports', '/sync', '/stalled', '/admin', '/profile'];
     const isProcessDetails = /^\/process\/[a-f0-9-]+$/.test(location.pathname);
     if (!validPaths.includes(location.pathname) && !isProcessDetails && location.pathname !== '/') {
       navigate('/', { replace: true });
@@ -39,6 +40,7 @@ function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User)
         <Route path="/tags" element={<TagsManager />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/sync" element={<SyncPage user={user} />} />
+        <Route path="/stalled" element={<StalledProcesses />} />
         <Route path="/admin" element={<Admin user={user} onUserUpdated={setUser} />} />
         <Route path="/profile" element={<Profile user={user} />} />
         <Route path="*" element={<Navigate to="/" replace />} />

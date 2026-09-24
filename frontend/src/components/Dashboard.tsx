@@ -1,8 +1,20 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Process } from '../types';
-import { listProcesses } from '../api';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { listProcesses, listStalledProcesses } from '../api';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+  Legend,
+  LineChart,
+  Line,
+  CartesianGrid,
+} from 'recharts';
 import Spinner from './ui/Spinner';
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -14,9 +26,28 @@ const statusConfig: Record<string, { label: string; color: string }> = {
 
 const unitColors = ['#009C60', '#29ABE2', '#8DC63F', '#F59E0B', '#6366F1'];
 
+const MONTH_NAMES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
 function daysAgo(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+function dayKey(value: string): string | null {
+  if (!value) return null;
+  const br = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (br) return `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}`;
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const d = new Date(value);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return null;
+}
+
+function addDaysKey(key: string, days: number): string {
+  const d = new Date(`${key}T00:00:00`);
+  d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -39,8 +70,10 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [processes, setProcesses] = useState<Process[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dateFrom, setDateFrom] = useState('');
+  const [defaultFrom] = useState(() => daysAgo(182));
+  const [dateFrom, setDateFrom] = useState(defaultFrom);
   const [dateTo, setDateTo] = useState('');
+  const [stalledCount, setStalledCount] = useState<number | null>(null);
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -57,33 +90,110 @@ export default function Dashboard() {
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [loadData]);
 
+  useEffect(() => {
+    listStalledProcesses()
+      .then((items) => setStalledCount(items.length))
+      .catch(() => setStalledCount(null));
+  }, []);
+
   const total = processes.length;
-  const emAndamentoList = processes.filter((p) => p.status === 'em_andamento');
+  const emAndamento = processes.filter((p) => p.status === 'em_andamento').length;
+  const finalizados = processes.filter((p) => p.status === 'finalizado').length;
   const comResumo = processes.filter((p) => p.resumoIa).length;
+  const semResumo = total - comResumo;
 
-  const unitCount = emAndamentoList.reduce<Record<string, number>>((acc, p) => {
-    for (const u of p.unidades) {
-      acc[u.sigla] = (acc[u.sigla] || 0) + 1;
+  const byUnit = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of processes.filter((proc) => proc.status === 'em_andamento')) {
+      if (p.unidades.length > 0) {
+        for (const u of p.unidades) counts[u.sigla] = (counts[u.sigla] || 0) + 1;
+      } else if (p.unidadeAtual?.sigla) {
+        counts[p.unidadeAtual.sigla] = (counts[p.unidadeAtual.sigla] || 0) + 1;
+      }
     }
-    return acc;
-  }, {});
-  const byUnit = Object.entries(unitCount)
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 10);
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name: name.replace(/\s+/g, ' ').trim(), value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
+  }, [processes]);
 
-  const recent = [...processes]
-    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-    .slice(0, 5);
+  const byTipo = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of processes) {
+      const t = p.tipo || 'Não informado';
+      counts[t] = (counts[t] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
+  }, [processes]);
+
+  const tipoTickWidth = useMemo(
+    () => Math.ceil((Math.max(1, ...byTipo.map((t) => t.name.length)) * 6 + 12) / 2),
+    [byTipo]
+  );
+
+  const byDay = useMemo(() => {
+    const autuacoes = new Map<string, number>();
+    const finais = new Map<string, number>();
+    const allKeys = new Set<string>();
+    for (const p of processes) {
+      const ka = dayKey(p.dataAutuacao || '');
+      if (ka) {
+        autuacoes.set(ka, (autuacoes.get(ka) || 0) + 1);
+        allKeys.add(ka);
+      }
+      if (p.status === 'finalizado') {
+        const kf = dayKey(p.ultimoAndamento?.dataHora || '');
+        if (kf) {
+          finais.set(kf, (finais.get(kf) || 0) + 1);
+          allKeys.add(kf);
+        }
+      }
+    }
+    if (allKeys.size === 0) return { points: [] as { key: string; autuacoes: number; finalizados: number }[], weekTicks: [] as string[] };
+
+    const sorted = Array.from(allKeys).sort();
+    const min = sorted[0];
+    const max = sorted[sorted.length - 1];
+    const points: { key: string; autuacoes: number; finalizados: number }[] = [];
+    const weekTicks: string[] = [];
+    const spanDays = Math.round((new Date(`${max}T00:00:00`).getTime() - new Date(`${min}T00:00:00`).getTime()) / 86400000);
+    const keys = spanDays <= 1000 ? (() => {
+      const arr: string[] = [];
+      for (let k = min; k <= max; k = addDaysKey(k, 1)) arr.push(k);
+      return arr;
+    })() : sorted;
+
+    for (const k of keys) {
+      const a = autuacoes.get(k) || 0;
+      const f = finais.get(k) || 0;
+      if (a === 0 && f === 0) continue;
+      points.push({ key: k, autuacoes: a, finalizados: f });
+    }
+    points.forEach((p, i) => {
+      if (i % 7 === 0) weekTicks.push(p.key);
+    });
+    return { points, weekTicks };
+  }, [processes]);
+
+  const recent = useMemo(
+    () => [...processes].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5),
+    [processes]
+  );
 
   const kpis = [
     { label: 'Total de Processos', value: total, color: '#009C60', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', path: '/processes' },
-    { label: 'Em Andamento', value: emAndamentoList.length, color: '#6366F1', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', path: '/processes' },
-    { label: 'Finalizados', value: processes.filter((p) => p.status === 'finalizado').length, color: '#8DC63F', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', path: '/processes' },
+    { label: 'Em Andamento', value: emAndamento, color: '#6366F1', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', path: '/processes' },
+    { label: 'Finalizados', value: finalizados, color: '#8DC63F', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', path: '/processes' },
     { label: 'Com Resumo', value: comResumo, color: '#29ABE2', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', path: '/processes' },
+    { label: 'Sem Resumo', value: semResumo, color: '#F59E0B', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', path: '/processes/sem-resumo' },
+    { label: 'Processos Parados', value: stalledCount, color: '#6B7280', icon: 'M12 6v6l4 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z', path: '/stalled' },
   ];
 
-  const hasPeriod = Boolean(dateFrom || dateTo);
+  const hasPeriod = dateFrom !== defaultFrom || Boolean(dateTo);
+  const cardCls = 'bg-white rounded-xl border border-gray-100 p-6';
 
   return (
     <div className="p-8 space-y-6" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -96,7 +206,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-2 flex-wrap">
           {hasPeriod && (
             <button
-              onClick={() => { setDateFrom(''); setDateTo(''); }}
+              onClick={() => { setDateFrom(defaultFrom); setDateTo(''); }}
               className="text-xs font-medium px-3 py-2 rounded-lg text-white transition-colors hover:bg-red-700"
               style={{ background: '#DC2626' }}
             >
@@ -137,7 +247,7 @@ export default function Dashboard() {
               className="text-sm text-gray-700 focus:outline-none"
             />
           </div>
-          </div>
+        </div>
       </div>
 
       {loading && processes.length === 0 ? (
@@ -148,7 +258,7 @@ export default function Dashboard() {
       ) : (
         <>
           {/* KPIs */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
             {kpis.map((kpi) => (
               <button
                 key={kpi.label}
@@ -157,9 +267,9 @@ export default function Dashboard() {
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-gray-500 text-xs font-medium uppercase tracking-wide">{kpi.label}</p>
+                    <p className="text-gray-500 text-[11px] font-medium uppercase tracking-wide">{kpi.label}</p>
                     <p className="text-3xl font-bold text-gray-900 mt-1" style={{ fontFamily: "'Outfit', sans-serif" }}>
-                      {kpi.value}
+                      {kpi.value ?? '—'}
                     </p>
                   </div>
                   <div className="rounded-lg p-2" style={{ background: kpi.color + '18' }}>
@@ -172,32 +282,58 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* Gráfico de unidade + últimos processos */}
+          {/* Evolução + Últimos processos */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-xl border border-gray-100 p-6">
-              <h2 className="text-sm font-semibold text-gray-800 mb-1" style={{ fontFamily: "'Outfit', sans-serif" }}>Processos por Unidade</h2>
-              <p className="text-xs text-gray-400 mb-4">Top 10 · apenas processos em andamento{hasPeriod ? ' no período' : ''}</p>
-              {byUnit.length > 0 ? (
-                <ResponsiveContainer width="100%" height={Math.max(200, byUnit.length * 28)}>
-                  <BarChart data={byUnit} layout="vertical" margin={{ left: 0, right: 16 }}>
-                    <XAxis type="number" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={170} />
-                    <Tooltip formatter={(value) => [String(value), 'Processos']} contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }} cursor={{ fill: '#f3f4f6' }} />
-                    <Bar dataKey="value" radius={4}>
-                      {byUnit.map((_, i) => (
-                        <Cell key={i} fill={unitColors[i % unitColors.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
+            <div className={cardCls}>
+              <h2 className="text-sm font-semibold text-gray-800 mb-1" style={{ fontFamily: "'Outfit', sans-serif" }}>Evolução de Autuações e Finalizados</h2>
+              <p className="text-xs text-gray-400 mb-4">Autuações (azul) e finalizados por dia — último andamento na data (verde)</p>
+              {byDay.points.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={byDay.points} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis
+                      dataKey="key"
+                      ticks={byDay.weekTicks}
+                      tick={{ fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(k: string) => {
+                        const isFirst = k === byDay.weekTicks[0];
+                        const isMonthStart = addDaysKey(k, -7).slice(0, 7) !== k.slice(0, 7);
+                        if (isFirst || isMonthStart) {
+                          const month = k.slice(5, 7);
+                          return `${MONTH_NAMES[parseInt(month, 10) - 1]}${isFirst || month === '01' ? '/' + k.slice(2, 4) : ''}`;
+                        }
+                        return k.slice(8, 10);
+                      }}
+                    />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={36} />
+                    <Tooltip
+                      labelFormatter={(k) => {
+                        const [y, m, d] = String(k).split('-');
+                        return `${d}/${m}/${y}`;
+                      }}
+                      formatter={(value, name) => [String(value), String(name)]}
+                      contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Line type="monotone" dataKey="autuacoes" name="Autuações" stroke="#29ABE2" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="finalizados" name="Finalizados" stroke="#009C60" strokeWidth={2} dot={false} />
+                  </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="text-sm text-gray-400 text-center py-8">Nenhum processo em andamento no período.</p>
+                <p className="text-sm text-gray-400 text-center py-12">Sem dados de autuação no período.</p>
               )}
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-100 p-6">
+            <div className={cardCls}>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold text-gray-800" style={{ fontFamily: "'Outfit', sans-serif" }}>Últimos Processos{hasPeriod ? ' (período)' : ' Cadastrados'}</h2>
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-800" style={{ fontFamily: "'Outfit', sans-serif" }}>
+                    Últimos Processos{hasPeriod ? ' (período)' : ' Cadastrados'}
+                  </h2>
+                  <p className="text-xs text-gray-400">Mais recentes primeiro</p>
+                </div>
                 <button
                   onClick={() => navigate('/processes')}
                   className="text-xs font-medium hover:underline"
@@ -233,6 +369,47 @@ export default function Dashboard() {
                   <p className="text-sm text-gray-400 text-center py-4">Nenhum processo encontrado no período.</p>
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* Top Unidades + Top Tipos */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className={cardCls}>
+              <h2 className="text-sm font-semibold text-gray-800 mb-1" style={{ fontFamily: "'Outfit', sans-serif" }}>Processos por Unidade</h2>
+              <p className="text-xs text-gray-400 mb-4">Top 10 · apenas processos em andamento{hasPeriod ? ' no período' : ''}</p>
+              {byUnit.length > 0 ? (
+                <ResponsiveContainer width="100%" height={Math.max(200, byUnit.length * 30)}>
+                  <BarChart data={byUnit} layout="vertical" margin={{ left: 0, right: 16 }}>
+                    <XAxis type="number" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width="auto" interval={0} />
+                    <Tooltip formatter={(value) => [String(value), 'Processos']} contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }} cursor={{ fill: '#f3f4f6' }} />
+                    <Bar dataKey="value" radius={4}>
+                      {byUnit.map((_, i) => (
+                        <Cell key={i} fill={unitColors[i % unitColors.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-gray-400 text-center py-8">Nenhum processo em andamento no período.</p>
+              )}
+            </div>
+
+            <div className={cardCls}>
+              <h2 className="text-sm font-semibold text-gray-800 mb-1" style={{ fontFamily: "'Outfit', sans-serif" }}>Top Tipos de Processo</h2>
+              <p className="text-xs text-gray-400 mb-4">10 tipos mais frequentes no período</p>
+              {byTipo.length > 0 ? (
+                <ResponsiveContainer width="100%" height={Math.max(200, byTipo.length * 30)}>
+                  <BarChart data={byTipo} layout="vertical" margin={{ left: 0, right: 16 }}>
+                    <XAxis type="number" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={tipoTickWidth} interval={0} />
+                    <Tooltip formatter={(value) => [String(value), 'Processos']} contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }} cursor={{ fill: '#f3f4f6' }} />
+                    <Bar dataKey="value" radius={4} fill="#29ABE2" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-gray-400 text-center py-8">Nenhum tipo no período.</p>
+              )}
             </div>
           </div>
         </>
