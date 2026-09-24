@@ -14,6 +14,7 @@ import {
   LineChart,
   Line,
   CartesianGrid,
+  Text,
 } from 'recharts';
 import Spinner from './ui/Spinner';
 
@@ -70,7 +71,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [processes, setProcesses] = useState<Process[]>([]);
   const [loading, setLoading] = useState(true);
-  const [defaultFrom] = useState(() => daysAgo(182));
+  const [defaultFrom] = useState(() => daysAgo(31));
   const [dateFrom, setDateFrom] = useState(defaultFrom);
   const [dateTo, setDateTo] = useState('');
   const [stalledCount, setStalledCount] = useState<number | null>(null);
@@ -152,13 +153,19 @@ export default function Dashboard() {
         }
       }
     }
-    if (allKeys.size === 0) return { points: [] as { key: string; autuacoes: number; finalizados: number }[], weekTicks: [] as string[] };
+    if (allKeys.size === 0) {
+      return {
+        points: [] as { key: string; autuacoes: number; finalizados: number }[],
+        spanDays: 0,
+        dayTicks: [] as string[],
+        monthTicks: [] as string[],
+      };
+    }
 
     const sorted = Array.from(allKeys).sort();
     const min = sorted[0];
     const max = sorted[sorted.length - 1];
     const points: { key: string; autuacoes: number; finalizados: number }[] = [];
-    const weekTicks: string[] = [];
     const spanDays = Math.round((new Date(`${max}T00:00:00`).getTime() - new Date(`${min}T00:00:00`).getTime()) / 86400000);
     const keys = spanDays <= 1000 ? (() => {
       const arr: string[] = [];
@@ -172,11 +179,40 @@ export default function Dashboard() {
       if (a === 0 && f === 0) continue;
       points.push({ key: k, autuacoes: a, finalizados: f });
     }
-    points.forEach((p, i) => {
-      if (i % 7 === 0) weekTicks.push(p.key);
-    });
-    return { points, weekTicks };
+
+    // Marca de meses: primeiro ponto de cada mês
+    const monthTicks: string[] = [];
+    const seenMonths = new Set<string>();
+    for (const p of points) {
+      const month = p.key.slice(0, 7);
+      if (!seenMonths.has(month)) {
+        seenMonths.add(month);
+        monthTicks.push(p.key);
+      }
+    }
+
+    // Marca de dias (janela de no máximo 31 dias): ~8 rótulos + último ponto
+    const dayTicks: string[] = [];
+    if (spanDays <= 31 && points.length > 0) {
+      const step = Math.max(1, Math.ceil(points.length / 8));
+      points.forEach((p, i) => {
+        if (i % step === 0) dayTicks.push(p.key);
+      });
+      const last = points[points.length - 1].key;
+      if (!dayTicks.includes(last)) dayTicks.push(last);
+    }
+
+    return { points, spanDays, dayTicks, monthTicks };
   }, [processes]);
+
+  // Eixo X da evolução: dias se a janela do gráfico for de no máximo 1 mês (31 dias), senão meses
+  const evoDayAxis = byDay.spanDays <= 31;
+  const evoTickFormat = (k: string): string => {
+    if (evoDayAxis) return `${k.slice(8, 10)}/${k.slice(5, 7)}`;
+    const month = k.slice(5, 7);
+    const isFirst = k === byDay.monthTicks[0];
+    return `${MONTH_NAMES[parseInt(month, 10) - 1]}${isFirst || month === '01' ? '/' + k.slice(2, 4) : ''}`;
+  };
 
   const recent = useMemo(
     () => [...processes].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 5),
@@ -293,19 +329,11 @@ export default function Dashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis
                       dataKey="key"
-                      ticks={byDay.weekTicks}
+                      ticks={evoDayAxis ? byDay.dayTicks : byDay.monthTicks}
                       tick={{ fontSize: 11 }}
                       axisLine={false}
                       tickLine={false}
-                      tickFormatter={(k: string) => {
-                        const isFirst = k === byDay.weekTicks[0];
-                        const isMonthStart = addDaysKey(k, -7).slice(0, 7) !== k.slice(0, 7);
-                        if (isFirst || isMonthStart) {
-                          const month = k.slice(5, 7);
-                          return `${MONTH_NAMES[parseInt(month, 10) - 1]}${isFirst || month === '01' ? '/' + k.slice(2, 4) : ''}`;
-                        }
-                        return k.slice(8, 10);
-                      }}
+                      tickFormatter={evoTickFormat}
                     />
                     <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={36} />
                     <Tooltip
@@ -402,7 +430,25 @@ export default function Dashboard() {
                 <ResponsiveContainer width="100%" height={Math.max(200, byTipo.length * 30)}>
                   <BarChart data={byTipo} layout="vertical" margin={{ left: 0, right: 16 }}>
                     <XAxis type="number" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={tipoTickWidth} interval={0} />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      axisLine={false}
+                      tickLine={false}
+                      width={tipoTickWidth}
+                      interval={0}
+                      tick={(props: any) => (
+                        <Text
+                          {...props}
+                          x={0}
+                          textAnchor="start"
+                          maxLines={2}
+                          style={{ fontSize: '10px', fontFamily: "'Inter', sans-serif" }}
+                        >
+                          {String(props.payload?.value ?? '')}
+                        </Text>
+                      )}
+                    />
                     <Tooltip formatter={(value) => [String(value), 'Processos']} contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }} cursor={{ fill: '#f3f4f6' }} />
                     <Bar dataKey="value" radius={4} fill="#29ABE2" />
                   </BarChart>
