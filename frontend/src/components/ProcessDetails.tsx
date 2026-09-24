@@ -72,7 +72,7 @@ export default function ProcessDetails({ user }: Props) {
     return (
       <div className="p-8 text-center">
         <p className="text-gray-500">Processo não encontrado ou carregando…</p>
-        <button onClick={() => navigate('/processes')} className="mt-4 text-sm" style={{ color: '#009C60' }}>
+        <button onClick={() => navigate('/processos')} className="mt-4 text-sm" style={{ color: '#009C60' }}>
           ← Voltar para lista
         </button>
       </div>
@@ -201,7 +201,7 @@ export default function ProcessDetails({ user }: Props) {
     if (!ok) return;
     try {
       await deleteProcess(process.id);
-      navigate('/processes');
+      navigate('/processos');
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao excluir processo.');
     }
@@ -239,12 +239,12 @@ export default function ProcessDetails({ user }: Props) {
   const handleClickRelated = async (numero: string) => {
     const existing = await findProcessByNumero(numero);
     if (existing) {
-      navigate('/process/' + existing.id);
+      navigate('/processo/' + existing.id);
       return;
     }
     try {
       const created = await createProcess(numero);
-      navigate('/process/' + created.id);
+      navigate('/processo/' + created.id);
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao cadastrar processo.');
     }
@@ -272,7 +272,7 @@ export default function ProcessDetails({ user }: Props) {
     <div className="p-8 space-y-6" style={{ fontFamily: "'Inter', sans-serif" }}>
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-gray-500">
-        <button onClick={() => navigate('/processes')} className="hover:underline" style={{ color: '#009C60' }}>
+        <button onClick={() => navigate('/processos')} className="hover:underline" style={{ color: '#009C60' }}>
           Processos
         </button>
         <span>/</span>

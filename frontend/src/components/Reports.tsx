@@ -1309,7 +1309,7 @@ export default function Reports() {
                           {pageItems.map((p) => (
                             <tr
                               key={p.id}
-                              onClick={() => navigate(`/process/${p.id}`)}
+                              onClick={() => navigate(`/processo/${p.id}`)}
                               className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors"
                             >
                               <td className="px-4 py-3 font-mono text-xs text-gray-600 whitespace-nowrap">{p.numeroSei}</td>

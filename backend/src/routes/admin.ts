@@ -9,7 +9,7 @@ router.use(authMiddleware);
 router.use(adminOnly);
 
 // Users
-router.get("/users", async (_req: Request, res: Response) => {
+router.get("/usuarios", async (_req: Request, res: Response) => {
   try {
     const users = await prisma.user.findMany({
       select: { id: true, name: true, email: true, role: true, authSource: true, active: true, createdAt: true },
@@ -21,7 +21,7 @@ router.get("/users", async (_req: Request, res: Response) => {
   }
 });
 
-router.post("/users", async (req: Request, res: Response) => {
+router.post("/usuarios", async (req: Request, res: Response) => {
   try {
     const { name, email, password, role, authSource } = req.body;
 
@@ -54,7 +54,7 @@ router.post("/users", async (req: Request, res: Response) => {
   }
 });
 
-router.put("/users/:id", async (req: Request, res: Response) => {
+router.put("/usuarios/:id", async (req: Request, res: Response) => {
   try {
     const { name, email, role, active, password } = req.body;
 
@@ -94,7 +94,7 @@ router.put("/users/:id", async (req: Request, res: Response) => {
   }
 });
 
-router.delete("/users/:id", async (req: Request, res: Response) => {
+router.delete("/usuarios/:id", async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) {
@@ -110,7 +110,7 @@ router.delete("/users/:id", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/users/:id/sync-units", async (req: Request, res: Response) => {
+router.post("/usuarios/:id/sincronizar-unidades", async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) {
@@ -142,7 +142,7 @@ router.post("/users/:id/sync-units", async (req: Request, res: Response) => {
 });
 
 // Sync logs
-router.get("/logs", async (req: Request, res: Response) => {
+router.get("/registros", async (req: Request, res: Response) => {
   try {
     const logs = await prisma.syncLog.findMany({
       orderBy: { executedAt: "desc" },
@@ -155,7 +155,7 @@ router.get("/logs", async (req: Request, res: Response) => {
 });
 
 // Configurations
-router.get("/config", async (_req: Request, res: Response) => {
+router.get("/configuracoes", async (_req: Request, res: Response) => {
   try {
     const configs = await prisma.configuration.findMany();
     const result: Record<string, string> = {};
@@ -166,7 +166,7 @@ router.get("/config", async (_req: Request, res: Response) => {
   }
 });
 
-router.put("/config", async (req: Request, res: Response) => {
+router.put("/configuracoes", async (req: Request, res: Response) => {
   try {
     const configs = req.body;
 

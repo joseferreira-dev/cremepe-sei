@@ -143,7 +143,7 @@ router.post("/login", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/me", authMiddleware, async (req: Request, res: Response) => {
+router.get("/usuario-atual", authMiddleware, async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.userId },
@@ -162,7 +162,7 @@ router.get("/me", authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-router.get("/profile", authMiddleware, async (req: Request, res: Response) => {
+router.get("/perfil", authMiddleware, async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.userId },
@@ -188,7 +188,7 @@ router.get("/profile", authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-router.put("/profile", authMiddleware, async (req: Request, res: Response) => {
+router.put("/perfil", authMiddleware, async (req: Request, res: Response) => {
   try {
     const { name } = req.body;
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
@@ -221,7 +221,7 @@ router.put("/profile", authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-router.post("/sync-units", authMiddleware, async (req: Request, res: Response) => {
+router.post("/sincronizar-unidades", authMiddleware, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
     const user = await prisma.user.findUnique({ where: { id: userId } });

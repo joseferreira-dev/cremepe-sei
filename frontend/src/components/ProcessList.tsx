@@ -154,7 +154,7 @@ export default function ProcessList({ onlyWithoutResumo = false }: Props) {
           <p className="text-gray-500 text-sm mt-1">{total} processo(s) encontrado(s)</p>
         </div>
         <button
-          onClick={() => navigate('/new-process')}
+          onClick={() => navigate('/novo-processo')}
           className="flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors"
           style={{ background: '#009C60' }}
         >
@@ -339,8 +339,8 @@ export default function ProcessList({ onlyWithoutResumo = false }: Props) {
                   <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50/60 transition-colors">
                     <td className="px-4 py-3">
                       <a
-                        href={'/process/' + p.id}
-                        onClick={(e) => { e.preventDefault(); navigate('/process/' + p.id); }}
+                        href={'/processo/' + p.id}
+                        onClick={(e) => { e.preventDefault(); navigate('/processo/' + p.id); }}
                         className="font-mono text-xs font-semibold hover:underline"
                         style={{ color: '#009C60' }}
                       >

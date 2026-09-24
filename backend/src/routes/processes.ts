@@ -400,7 +400,7 @@ router.get("/", async (req: Request, res: Response) => {
 });
 
 // List stalled processes (em_andamento with no recent activity)
-router.get("/stalled", async (req: Request, res: Response) => {
+router.get("/parados", async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
     const userRole = user?.role || "assistente";
@@ -790,7 +790,7 @@ router.post("/", async (req: Request, res: Response) => {
 });
 
 // Batch import
-router.post("/import", async (req: Request, res: Response) => {
+router.post("/importar", async (req: Request, res: Response) => {
   try {
     const { numeros } = req.body;
 
@@ -961,7 +961,7 @@ router.post("/import", async (req: Request, res: Response) => {
 });
 
 // Batch sync with concurrency limit
-router.post("/sync-batch", async (req: Request, res: Response) => {
+router.post("/sincronizar-lote", async (req: Request, res: Response) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -1010,7 +1010,7 @@ router.post("/sync-batch", async (req: Request, res: Response) => {
 });
 
 // Sync with SEI
-router.post("/:id/sync", async (req: Request, res: Response) => {
+router.post("/:id/sincronizar", async (req: Request, res: Response) => {
   try {
     const process = await prisma.process.findUnique({ where: { id: req.params.id } });
     if (!process) {
@@ -1281,7 +1281,7 @@ router.get("/:id/resumo", async (req: Request, res: Response) => {
 
 // Generate AI summary from SEI documents (first 3 oldest)
 // Annotations
-router.post("/:id/annotations", async (req: Request, res: Response) => {
+router.post("/:id/anotacoes", async (req: Request, res: Response) => {
   try {
     const { content } = req.body;
 
@@ -1320,7 +1320,7 @@ router.post("/:id/annotations", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/:id/annotations", async (req: Request, res: Response) => {
+router.get("/:id/anotacoes", async (req: Request, res: Response) => {
   try {
     const process = await prisma.process.findUnique({ where: { id: req.params.id } });
     if (!process) {
@@ -1347,7 +1347,7 @@ router.get("/:id/annotations", async (req: Request, res: Response) => {
 });
 
 // Update annotation (only by author)
-router.put("/:id/annotations/:annotationId", async (req: Request, res: Response) => {
+router.put("/:id/anotacoes/:anotacaoId", async (req: Request, res: Response) => {
   try {
     const { content } = req.body;
 
@@ -1357,7 +1357,7 @@ router.put("/:id/annotations/:annotationId", async (req: Request, res: Response)
     }
 
     const annotation = await prisma.annotation.findUnique({
-      where: { id: req.params.annotationId },
+      where: { id: req.params.anotacaoId },
     });
 
     if (!annotation) {
@@ -1371,7 +1371,7 @@ router.put("/:id/annotations/:annotationId", async (req: Request, res: Response)
     }
 
     const updated = await prisma.annotation.update({
-      where: { id: req.params.annotationId },
+      where: { id: req.params.anotacaoId },
       data: { content: content.trim() },
     });
 
@@ -1383,10 +1383,10 @@ router.put("/:id/annotations/:annotationId", async (req: Request, res: Response)
 });
 
 // Delete annotation (author or admin)
-router.delete("/:id/annotations/:annotationId", async (req: Request, res: Response) => {
+router.delete("/:id/anotacoes/:anotacaoId", async (req: Request, res: Response) => {
   try {
     const annotation = await prisma.annotation.findUnique({
-      where: { id: req.params.annotationId },
+      where: { id: req.params.anotacaoId },
     });
 
     if (!annotation) {
@@ -1399,7 +1399,7 @@ router.delete("/:id/annotations/:annotationId", async (req: Request, res: Respon
       return;
     }
 
-    await prisma.annotation.delete({ where: { id: req.params.annotationId } });
+    await prisma.annotation.delete({ where: { id: req.params.anotacaoId } });
     res.json({ message: "Anotação excluída com sucesso." });
   } catch (error) {
     console.error("[ANNOTATIONS] Delete error:", error);

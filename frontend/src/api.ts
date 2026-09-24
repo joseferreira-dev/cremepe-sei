@@ -82,7 +82,7 @@ export async function login(
   email: string,
   password: string
 ): Promise<{ token: string; user: User }> {
-  const data = await request<{ token: string; user: User }>('/auth/login', {
+  const data = await request<{ token: string; user: User }>('/autenticacao/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -93,15 +93,15 @@ export async function login(
 }
 
 export async function fetchMe(): Promise<User> {
-  return request<User>('/auth/me');
+  return request<User>('/autenticacao/usuario-atual');
 }
 
 export async function fetchProfile(): Promise<User & { units: UserUnit[] }> {
-  return request<User & { units: UserUnit[] }>('/auth/profile');
+  return request<User & { units: UserUnit[] }>('/autenticacao/perfil');
 }
 
 export async function updateProfile(data: { name: string }): Promise<User> {
-  return request<User>('/auth/profile', {
+  return request<User>('/autenticacao/perfil', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -109,7 +109,7 @@ export async function updateProfile(data: { name: string }): Promise<User> {
 }
 
 export async function syncMyUnits(): Promise<{ synced: number }> {
-  return request<{ synced: number }>('/auth/sync-units', { method: 'POST' });
+  return request<{ synced: number }>('/autenticacao/sincronizar-unidades', { method: 'POST' });
 }
 
 // ---- Mapping backend Process to frontend Process ----
@@ -208,7 +208,7 @@ export async function listProcesses(params: {
   const data = await request<{
     processes: BackendProcess[];
     pagination: { total: number; totalPages: number };
-  }>(`/processes?${qs.toString()}`);
+  }>(`/processos?${qs.toString()}`);
 
   return {
     processes: (data.processes || []).map(mapProcess),
@@ -232,7 +232,7 @@ export interface StalledProcess {
 }
 
 export async function listStalledProcesses(): Promise<StalledProcess[]> {
-  const data = await request<{ processes: any[] }>('/processes/stalled');
+  const data = await request<{ processes: any[] }>('/processos/parados');
   return (data.processes || []).map((p) => ({
     ...p,
     unidadeAtual: p.unidadeAtual || {},
@@ -242,18 +242,18 @@ export async function listStalledProcesses(): Promise<StalledProcess[]> {
 }
 
 export async function getProcess(id: string): Promise<Process> {
-  const data = await request<BackendProcess>(`/processes/${id}`);
+  const data = await request<BackendProcess>(`/processos/${id}`);
   return mapProcess(data);
 }
 
 export async function findProcessByNumero(numeroSei: string): Promise<Process | null> {
-  const data = await request<{ processes: BackendProcess[] }>(`/processes?search=${encodeURIComponent(numeroSei)}&limit=1`);
+  const data = await request<{ processes: BackendProcess[] }>(`/processos?search=${encodeURIComponent(numeroSei)}&limit=1`);
   const found = data.processes?.find((p) => p.numeroSei === numeroSei);
   return found ? mapProcess(found) : null;
 }
 
 export async function createProcess(numeroSei: string): Promise<Process & { autoImportados?: number }> {
-  const data = await request<BackendProcess & { autoImportados?: number }>('/processes', {
+  const data = await request<BackendProcess & { autoImportados?: number }>('/processos', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ numeroSei }),
@@ -262,14 +262,14 @@ export async function createProcess(numeroSei: string): Promise<Process & { auto
 }
 
 export async function syncProcess(id: string): Promise<Process> {
-  const data = await request<BackendProcess>(`/processes/${id}/sync`, {
+  const data = await request<BackendProcess>(`/processos/${id}/sincronizar`, {
     method: 'POST',
   });
   return mapProcess(data);
 }
 
 export async function syncBatch(ids: string[]): Promise<{ results: { id: string; status: string; mensagem: string }[]; total: number; autoImportados: number }> {
-  return request(`/processes/sync-batch`, {
+  return request(`/processos/sincronizar-lote`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids }),
@@ -280,7 +280,7 @@ export async function updateProcess(
   id: string,
   body: { statusSistema?: string; tagIds?: string[] }
 ): Promise<Process> {
-  const data = await request<BackendProcess>(`/processes/${id}`, {
+  const data = await request<BackendProcess>(`/processos/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -289,7 +289,7 @@ export async function updateProcess(
 }
 
 export async function deleteProcess(id: string): Promise<void> {
-  await request(`/processes/${id}`, { method: 'DELETE' });
+  await request(`/processos/${id}`, { method: 'DELETE' });
 }
 
 export async function batchImport(
@@ -298,7 +298,7 @@ export async function batchImport(
   results: { numero: string; status: string; mensagem: string }[];
   summary: { total: number; successes: number; errors: number };
 }> {
-  return request('/processes/import', {
+  return request('/processos/importar', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ numeros }),
@@ -313,14 +313,14 @@ export async function generateSummary(
   const form = new FormData();
   files.forEach((f) => form.append('files', f));
   if (textoManual) form.append('textoManual', textoManual);
-  return request(`/processes/${id}/resumo`, { method: 'POST', body: form });
+  return request(`/processos/${id}/resumo`, { method: 'POST', body: form });
 }
 
 export async function saveSummary(
   id: string,
   resumo: string
 ): Promise<{ process: Process }> {
-  return request(`/processes/${id}/resumo/save`, {
+  return request(`/processos/${id}/resumo/save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ resumo }),
@@ -328,22 +328,22 @@ export async function saveSummary(
 }
 
 export async function generateSummaryFromDocs(id: string): Promise<{ resumo: string }> {
-  return request(`/processes/${id}/resumo-documentos`, { method: 'POST' });
+  return request(`/processos/${id}/resumo-documentos`, { method: 'POST' });
 }
 
 export async function getSummary(
   id: string
 ): Promise<{ resumoIa: string | null; resumoGeradoEm: string | null }> {
-  return request(`/processes/${id}/resumo`);
+  return request(`/processos/${id}/resumo`);
 }
 
 // ---- Annotations ----
 export async function listAnnotations(processId: string): Promise<Annotation[]> {
-  return request(`/processes/${processId}/annotations`);
+  return request(`/processos/${processId}/anotacoes`);
 }
 
 export async function createAnnotation(processId: string, content: string): Promise<Annotation> {
-  return request(`/processes/${processId}/annotations`, {
+  return request(`/processos/${processId}/anotacoes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),
@@ -355,7 +355,7 @@ export async function updateAnnotation(
   annotationId: string,
   content: string
 ): Promise<Annotation> {
-  return request(`/processes/${processId}/annotations/${annotationId}`, {
+  return request(`/processos/${processId}/anotacoes/${annotationId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),
@@ -363,7 +363,7 @@ export async function updateAnnotation(
 }
 
 export async function deleteAnnotation(processId: string, annotationId: string): Promise<void> {
-  await request(`/processes/${processId}/annotations/${annotationId}`, { method: 'DELETE' });
+  await request(`/processos/${processId}/anotacoes/${annotationId}`, { method: 'DELETE' });
 }
 
 // ---- Andamentos ----
@@ -376,7 +376,7 @@ export interface Andamento {
 }
 
 export async function listAndamentos(processId: string): Promise<Andamento[]> {
-  const data = await request<{ andamentos: Andamento[] }>(`/processes/${processId}/andamentos`);
+  const data = await request<{ andamentos: Andamento[] }>(`/processos/${processId}/andamentos`);
   return data.andamentos || [];
 }
 
@@ -388,17 +388,17 @@ export interface ProcessoPai {
 }
 
 export async function listProcessosPai(processId: string): Promise<ProcessoPai[]> {
-  const data = await request<{ pais: ProcessoPai[] }>(`/processes/${processId}/pais`);
+  const data = await request<{ pais: ProcessoPai[] }>(`/processos/${processId}/pais`);
   return data.pais || [];
 }
 
 // ---- Tags ----
 export async function listTags(): Promise<Tag[]> {
-  return request<Tag[]>('/tags');
+  return request<Tag[]>('/etiquetas');
 }
 
 export async function createTag(name: string, color: string): Promise<Tag> {
-  return request<Tag>('/tags', {
+  return request<Tag>('/etiquetas', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, color }),
@@ -406,7 +406,7 @@ export async function createTag(name: string, color: string): Promise<Tag> {
 }
 
 export async function updateTag(id: string, name: string, color: string): Promise<Tag> {
-  return request<Tag>(`/tags/${id}`, {
+  return request<Tag>(`/etiquetas/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, color }),
@@ -414,12 +414,12 @@ export async function updateTag(id: string, name: string, color: string): Promis
 }
 
 export async function deleteTag(id: string): Promise<void> {
-  await request(`/tags/${id}`, { method: 'DELETE' });
+  await request(`/etiquetas/${id}`, { method: 'DELETE' });
 }
 
 // ---- Admin ----
 export async function listUsers(): Promise<User[]> {
-  return request<User[]>('/admin/users');
+  return request<User[]>('/administracao/usuarios');
 }
 
 export async function createUser(data: {
@@ -429,7 +429,7 @@ export async function createUser(data: {
   role: string;
   authSource?: string;
 }): Promise<User> {
-  return request<User>('/admin/users', {
+  return request<User>('/administracao/usuarios', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -440,7 +440,7 @@ export async function updateUser(
   id: string,
   data: { name?: string; email?: string; role?: string; active?: boolean; password?: string }
 ): Promise<User> {
-  return request<User>(`/admin/users/${id}`, {
+  return request<User>(`/administracao/usuarios/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -448,15 +448,15 @@ export async function updateUser(
 }
 
 export async function deleteUser(id: string): Promise<void> {
-  await request(`/admin/users/${id}`, { method: 'DELETE' });
+  await request(`/administracao/usuarios/${id}`, { method: 'DELETE' });
 }
 
 export async function syncUserUnits(id: string): Promise<{ synced: number }> {
-  return request<{ synced: number }>(`/admin/users/${id}/sync-units`, { method: 'POST' });
+  return request<{ synced: number }>(`/administracao/usuarios/${id}/sincronizar-unidades`, { method: 'POST' });
 }
 
 export async function listLogs(): Promise<SyncLog[]> {
-  return request<SyncLog[]>('/admin/logs');
+  return request<SyncLog[]>('/administracao/registros');
 }
 
 // ---- SEI ----

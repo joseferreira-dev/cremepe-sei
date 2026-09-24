@@ -395,8 +395,8 @@ export default function SyncPage({ user }: { user: User }) {
                   <tr key={p.id} className={`border-b border-gray-50 ${isConcluido ? 'bg-gray-50/60' : ''}`}>
                     <td className="px-4 py-3">
                       <a
-                        href={'/process/' + p.id}
-                        onClick={(e) => { e.preventDefault(); navigate('/process/' + p.id); }}
+                        href={'/processo/' + p.id}
+                        onClick={(e) => { e.preventDefault(); navigate('/processo/' + p.id); }}
                         className="font-mono text-xs font-semibold hover:underline"
                         style={{ color: '#009C60' }}
                       >

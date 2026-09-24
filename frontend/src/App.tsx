@@ -22,8 +22,8 @@ function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User)
 
   useEffect(() => {
     // Redireciona para dashboard se a URL não existe
-    const validPaths = ['/', '/processes', '/processes/sem-resumo', '/new-process', '/tags', '/reports', '/sync', '/stalled', '/admin', '/profile'];
-    const isProcessDetails = /^\/process\/[a-f0-9-]+$/.test(location.pathname);
+    const validPaths = ['/', '/processos', '/processos/sem-resumo', '/novo-processo', '/etiquetas', '/relatorios', '/sincronizacao', '/parados', '/administracao', '/perfil'];
+    const isProcessDetails = /^\/processo\/[a-f0-9-]+$/.test(location.pathname);
     if (!validPaths.includes(location.pathname) && !isProcessDetails && location.pathname !== '/') {
       navigate('/', { replace: true });
     }
@@ -33,16 +33,16 @@ function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User)
     <Layout user={user} currentPage={location.pathname} onLogout={onLogout}>
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/processes" element={<ProcessList />} />
-        <Route path="/processes/sem-resumo" element={<ProcessList onlyWithoutResumo />} />
-        <Route path="/process/:id" element={<ProcessDetails user={user} />} />
-        <Route path="/new-process" element={<NewProcess />} />
-        <Route path="/tags" element={<TagsManager />} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/sync" element={<SyncPage user={user} />} />
-        <Route path="/stalled" element={<StalledProcesses />} />
-        <Route path="/admin" element={<Admin user={user} onUserUpdated={setUser} />} />
-        <Route path="/profile" element={<Profile user={user} />} />
+        <Route path="/processos" element={<ProcessList />} />
+        <Route path="/processos/sem-resumo" element={<ProcessList onlyWithoutResumo />} />
+        <Route path="/processo/:id" element={<ProcessDetails user={user} />} />
+        <Route path="/novo-processo" element={<NewProcess />} />
+        <Route path="/etiquetas" element={<TagsManager />} />
+        <Route path="/relatorios" element={<Reports />} />
+        <Route path="/sincronizacao" element={<SyncPage user={user} />} />
+        <Route path="/parados" element={<StalledProcesses />} />
+        <Route path="/administracao" element={<Admin user={user} onUserUpdated={setUser} />} />
+        <Route path="/perfil" element={<Profile user={user} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

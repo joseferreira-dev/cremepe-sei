@@ -238,8 +238,8 @@ function StalledProcessesInner() {
                   <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50/60 transition-colors">
                     <td className="px-4 py-3">
                       <a
-                        href={'/process/' + p.id}
-                        onClick={(e) => { e.preventDefault(); navigate('/process/' + p.id); }}
+                        href={'/processo/' + p.id}
+                        onClick={(e) => { e.preventDefault(); navigate('/processo/' + p.id); }}
                         className="font-mono text-xs font-semibold hover:underline"
                         style={{ color: '#009C60' }}
                       >

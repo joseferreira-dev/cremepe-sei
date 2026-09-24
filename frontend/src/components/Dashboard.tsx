@@ -184,12 +184,12 @@ export default function Dashboard() {
   );
 
   const kpis = [
-    { label: 'Total de Processos', value: total, color: '#009C60', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', path: '/processes' },
-    { label: 'Em Andamento', value: emAndamento, color: '#6366F1', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', path: '/processes' },
-    { label: 'Finalizados', value: finalizados, color: '#8DC63F', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', path: '/processes' },
-    { label: 'Com Resumo', value: comResumo, color: '#29ABE2', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', path: '/processes' },
-    { label: 'Sem Resumo', value: semResumo, color: '#F59E0B', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', path: '/processes/sem-resumo' },
-    { label: 'Processos Parados', value: stalledCount, color: '#6B7280', icon: 'M12 6v6l4 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z', path: '/stalled' },
+    { label: 'Total de Processos', value: total, color: '#009C60', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', path: '/processos' },
+    { label: 'Em Andamento', value: emAndamento, color: '#6366F1', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', path: '/processos' },
+    { label: 'Finalizados', value: finalizados, color: '#8DC63F', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', path: '/processos' },
+    { label: 'Com Resumo', value: comResumo, color: '#29ABE2', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z', path: '/processos' },
+    { label: 'Sem Resumo', value: semResumo, color: '#F59E0B', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z', path: '/processos/sem-resumo' },
+    { label: 'Processos Parados', value: stalledCount, color: '#6B7280', icon: 'M12 6v6l4 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z', path: '/parados' },
   ];
 
   const hasPeriod = dateFrom !== defaultFrom || Boolean(dateTo);
@@ -335,7 +335,7 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-400">Mais recentes primeiro</p>
                 </div>
                 <button
-                  onClick={() => navigate('/processes')}
+                  onClick={() => navigate('/processos')}
                   className="text-xs font-medium hover:underline"
                   style={{ color: '#009C60' }}
                 >
@@ -348,8 +348,8 @@ export default function Dashboard() {
                   return (
                     <a
                       key={p.id}
-                      href={'/process/' + p.id}
-                      onClick={(e) => { e.preventDefault(); navigate('/process/' + p.id); }}
+                      href={'/processo/' + p.id}
+                      onClick={(e) => { e.preventDefault(); navigate('/processo/' + p.id); }}
                       className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors text-left"
                     >
                       <div className="shrink-0 rounded-md px-2 py-0.5 text-xs font-medium text-white" style={{ background: cfg.color }}>
