@@ -6,9 +6,11 @@ export interface User {
   email: string;
   role: UserRole;
   authSource: 'local' | 'ad';
+  username?: string | null;
   active: boolean;
   createdAt: string;
   units?: UserUnit[];
+  unitsSyncedAt?: string | null;
 }
 
 export interface UserUnit {
@@ -88,6 +90,12 @@ export interface Paginacao {
   limit: number;
   total: number;
   totalPages: number;
+}
+
+export interface EstatisticasPerfil {
+  queTenhoAcesso: number;
+  dasMinhasUnidades: number;
+  anotacoes: number;
 }
 
 export interface SistemaInfo {

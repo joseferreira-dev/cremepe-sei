@@ -34,12 +34,12 @@ export default function Login({ onLogin }: Props) {
         style={{ background: 'linear-gradient(160deg, #003D26 0%, #006B42 50%, #009C60 100%)' }}
       >
         <div>
-          <img src={logoCremepe} alt="CREMEPE" className="h-16 w-16 object-contain" />
+          <img src={logoCremepe} alt="CREMEPE" className="h-32 w-32 object-contain" />
           <h1
             className="mt-8 text-4xl font-bold text-white leading-tight"
             style={{ fontFamily: "'Outfit', sans-serif" }}
           >
-            CREMEPE<br />SEI
+            CREMEPE SEI
           </h1>
           <p className="mt-4 text-green-200 text-lg leading-relaxed">
             Sistema de Gestão Inteligente de Processos
@@ -89,7 +89,7 @@ export default function Login({ onLogin }: Props) {
           >
             Bem-vindo de volta
           </h2>
-          <p className="text-gray-500 text-sm mb-8">Entre com sua senha do Active Directory</p>
+          <p className="text-gray-500 text-sm mb-8">Entre com seu acesso do SEI</p>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
@@ -100,7 +100,7 @@ export default function Login({ onLogin }: Props) {
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:border-transparent transition-all"
                 style={{ '--tw-ring-color': '#009C60' } as React.CSSProperties}
-                placeholder="Ex: gjose"
+                placeholder="Digite seu nome de usuário"
                 autoComplete="username"
               />
             </div>

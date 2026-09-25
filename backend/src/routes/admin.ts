@@ -30,6 +30,7 @@ router.get("/usuarios", async (_req: Request, res: Response) => {
         email: true,
         role: true,
         authSource: true,
+        username: true,
         active: true,
         createdAt: true,
         units: {
@@ -47,7 +48,7 @@ router.get("/usuarios", async (_req: Request, res: Response) => {
 
 router.post("/usuarios", async (req: Request, res: Response) => {
   try {
-    const { name, email, password, role, authSource } = req.body;
+    const { name, email, password, role, authSource, username } = req.body;
 
     if (!name || !email) {
       res.status(400).json({ error: "Nome e e-mail são obrigatórios." });
@@ -65,6 +66,22 @@ router.post("/usuarios", async (req: Request, res: Response) => {
       }
     }
 
+    // Username: identificador de login de todos os usuários (sem @).
+    // Se não informado, deriva do prefixo do e-mail.
+    let usernameLimpo = typeof username === "string" ? username.trim() : "";
+    if (usernameLimpo && usernameLimpo.includes("@")) {
+      res.status(400).json({ error: "Username não deve conter '@'." });
+      return;
+    }
+    if (!usernameLimpo) {
+      usernameLimpo = email.includes("@") ? email.split("@")[0] : String(email);
+    }
+    const usernameExiste = await prisma.user.findUnique({ where: { username: usernameLimpo } });
+    if (usernameExiste) {
+      res.status(409).json({ error: `Username "${usernameLimpo}" já está em uso.` });
+      return;
+    }
+
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
       res.status(409).json({ error: "E-mail já cadastrado." });
@@ -74,11 +91,18 @@ router.post("/usuarios", async (req: Request, res: Response) => {
     const passwordHash = authSource === "ad" ? "" : await bcrypt.hash(password, 12);
 
     const user = await prisma.user.create({
-      data: { name, email, passwordHash, role: role || "assistente", authSource: authSource === "ad" ? "ad" : "local" },
-      select: { id: true, name: true, email: true, role: true, authSource: true, active: true, createdAt: true },
+      data: {
+        name,
+        email,
+        passwordHash,
+        role: role || "assistente",
+        authSource: authSource === "ad" ? "ad" : "local",
+        username: usernameLimpo,
+      },
+      select: { id: true, name: true, email: true, role: true, authSource: true, username: true, active: true, createdAt: true },
     });
 
-    await registrarAuditoria(req, "criar usuário", email, `papel: ${user.role} · autenticação: ${user.authSource}`);
+    await registrarAuditoria(req, "criar usuário", email, `papel: ${user.role} · autenticação: ${user.authSource} · username: ${usernameLimpo}`);
     res.status(201).json({ ...user, units: [] });
   } catch (error) {
     res.status(500).json({ error: "Erro ao criar usuário." });
@@ -87,7 +111,7 @@ router.post("/usuarios", async (req: Request, res: Response) => {
 
 router.put("/usuarios/:id", async (req: Request, res: Response) => {
   try {
-    const { name, email, role, active, password } = req.body;
+    const { name, email, role, active, password, username } = req.body;
 
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) {
@@ -131,6 +155,28 @@ router.put("/usuarios/:id", async (req: Request, res: Response) => {
       if (email && email !== user.email) {
         updateData.email = email;
         mudancas.push(`e-mail: ${user.email} → ${email}`);
+      }
+    }
+
+    // Username (identificador de login) — editável para todos os perfis
+    if (username !== undefined) {
+      const limpo = String(username).trim();
+      if (!limpo) {
+        res.status(400).json({ error: "Username é obrigatório." });
+        return;
+      }
+      if (limpo.includes("@")) {
+        res.status(400).json({ error: "Username não deve conter '@'." });
+        return;
+      }
+      if (limpo !== user.username) {
+        const conflito = await prisma.user.findUnique({ where: { username: limpo } });
+        if (conflito) {
+          res.status(409).json({ error: `Username "${limpo}" já está em uso.` });
+          return;
+        }
+        updateData.username = limpo;
+        mudancas.push(`username: ${user.username} → ${limpo}`);
       }
     }
 
@@ -216,7 +262,7 @@ router.post("/usuarios/:id/sincronizar-unidades", async (req: Request, res: Resp
     if (user.role === "admin") {
       unidades = await listarUnidades();
     } else {
-      const sigla = user.email.split("@")[0];
+      const sigla = user.username;
       unidades = await buscarUnidadesDoUsuario(sigla);
     }
 
@@ -225,6 +271,8 @@ router.post("/usuarios/:id/sincronizar-unidades", async (req: Request, res: Resp
         data: { userId: req.params.id, unitId: u.IdUnidade, unitSigla: u.Sigla, unitDesc: u.Descricao },
       });
     }
+
+    await prisma.user.update({ where: { id: req.params.id }, data: { unitsSyncedAt: new Date() } });
 
     await registrarAuditoria(req, "sincronizar unidades", user.email, `${unidades.length} unidade(s) via SEI`);
     res.json({ synced: unidades.length });
@@ -271,6 +319,8 @@ router.post("/usuarios/:id/unidades", async (req: Request, res: Response) => {
         data: limpas.map((u) => ({ userId: req.params.id, ...u })),
       });
     }
+
+    await prisma.user.update({ where: { id: req.params.id }, data: { unitsSyncedAt: new Date() } });
 
     await registrarAuditoria(req, "atribuir unidades", user.email, `${limpas.length} unidade(s) manualmente`);
     res.json({ synced: limpas.length });

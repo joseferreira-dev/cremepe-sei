@@ -15,21 +15,29 @@ const router = Router();
 
 router.post("/login", async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const campo = String(req.body.email ?? req.body.usuario ?? "").trim();
+    const password = req.body.password;
 
-    if (!email || !password) {
-      res.status(400).json({ error: "E-mail e senha são obrigatórios." });
+    if (!campo || !password) {
+      res.status(400).json({ error: "Usuário e senha são obrigatórios." });
       return;
     }
 
-    const username = email.includes("@") ? email.split("@")[0] : email;
+    // O login é feito pelo USERNAME (sem @) — mesmo identificador para usuários locais e do AD.
+    // Se digitado com "@", o e-mail é usado apenas como alias de consulta.
+    const semArroba = !campo.includes("@");
+    const tentativaAd = semArroba ? campo : campo.split("@")[0];
 
-    const user = await prisma.user.findUnique({ where: { email: email.includes("@") ? email : `${email}@cremepe.org.br` } });
+    const user = semArroba
+      ? await prisma.user.findUnique({ where: { username: campo } })
+      : await prisma.user.findUnique({ where: { email: campo } });
 
     if (user && user.authSource === "ad") {
-      const ldapUser = await ldapBind(username, password);
+      // A senha vem do AD: bind com o username (sAMAccountName) da conta
+      const idAd = user.username;
+      const ldapUser = await ldapBind(idAd, password);
       if (!ldapUser) {
-        await registrarAuditoria(req, "login", user.email, "falha: credenciais do Active Directory inválidas", { userId: user.id, userName: user.name });
+        await registrarAuditoria(req, "login", user.email, `falha: credenciais do Active Directory inválidas (${idAd})`, { userId: user.id, userName: user.name });
         res.status(401).json({ error: "Credenciais inválidas." });
         return;
       }
@@ -53,7 +61,7 @@ router.post("/login", async (req: Request, res: Response) => {
         { expiresIn: env.JWT_EXPIRES_IN } as SignOptions
       );
 
-      await registrarAuditoria(req, "login", user.email, "autenticação via Active Directory", { userId: user.id, userName: ldapUser.displayName });
+      await registrarAuditoria(req, "login", user.email, `autenticação via Active Directory (${idAd})`, { userId: user.id, userName: ldapUser.displayName });
 
       res.json({
         token,
@@ -103,33 +111,41 @@ router.post("/login", async (req: Request, res: Response) => {
       return;
     }
 
-    const ldapUser = await ldapBind(username, password);
+    // Conta ainda não cadastrada → primeiro acesso usando o username informado
+    const ldapUser = await ldapBind(tentativaAd, password);
     if (!ldapUser) {
-      await registrarAuditoria(req, "login", `${username}@cremepe.org.br`, "falha: usuário desconhecido ou credenciais do Active Directory inválidas", {
+      await registrarAuditoria(req, "login", campo, "falha: usuário não encontrado ou credenciais do Active Directory inválidas", {
         userId: null,
-        userName: `${username}@cremepe.org.br`,
+        userName: campo,
       });
-      res.status(401).json({ error: "Credenciais inválidas." });
+      res.status(401).json({ error: "Usuário não encontrado." });
       return;
     }
+
+    // E-mail vem do AD (atributo mail); em caso de colisão, usa o padrão do órgão
+    let emailNovo = ldapUser.mail || `${tentativaAd}@cremepe.org.br`;
+    const emailEmUso = await prisma.user.findUnique({ where: { email: emailNovo } });
+    if (emailEmUso) emailNovo = `${tentativaAd}@cremepe.org.br`;
 
     const newUser = await prisma.user.create({
       data: {
         name: ldapUser.displayName,
-        email: `${username}@cremepe.org.br`,
+        email: emailNovo,
         passwordHash: "",
         authSource: "ad",
+        username: tentativaAd,
         role: "assistente",
       },
     });
 
     try {
-      const unidades = await buscarUnidadesDoUsuario(username);
+      const unidades = await buscarUnidadesDoUsuario(tentativaAd);
       for (const u of unidades) {
         await prisma.userUnit.create({
           data: { userId: newUser.id, unitId: u.IdUnidade, unitSigla: u.Sigla, unitDesc: u.Descricao },
         });
       }
+      await prisma.user.update({ where: { id: newUser.id }, data: { unitsSyncedAt: new Date() } });
     } catch (e) {
       console.warn("[AUTH] Failed to sync units on first login:", e);
     }
@@ -140,7 +156,7 @@ router.post("/login", async (req: Request, res: Response) => {
         { expiresIn: env.JWT_EXPIRES_IN } as SignOptions
       );
 
-      await registrarAuditoria(req, "login", newUser.email, "primeiro acesso via Active Directory — conta criada automaticamente", {
+      await registrarAuditoria(req, "login", newUser.email, `primeiro acesso via Active Directory (${tentativaAd}) — conta criada automaticamente`, {
         userId: newUser.id,
         userName: ldapUser.displayName,
       });
@@ -186,7 +202,7 @@ router.get("/perfil", authMiddleware, async (req: Request, res: Response) => {
       where: { id: req.user!.userId },
       select: {
         id: true, name: true, email: true, role: true,
-        authSource: true, active: true, createdAt: true,
+        authSource: true, username: true, active: true, createdAt: true, unitsSyncedAt: true,
         units: {
           select: { id: true, unitId: true, unitSigla: true, unitDesc: true },
           orderBy: { unitSigla: "asc" },
@@ -208,7 +224,7 @@ router.get("/perfil", authMiddleware, async (req: Request, res: Response) => {
 
 router.put("/perfil", authMiddleware, async (req: Request, res: Response) => {
   try {
-    const { name } = req.body;
+    const { name, currentPassword, newPassword } = req.body;
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
 
     if (!user) {
@@ -216,11 +232,46 @@ router.put("/perfil", authMiddleware, async (req: Request, res: Response) => {
       return;
     }
 
+    const alterandoSenha = Boolean(currentPassword || newPassword);
+
     if (user.authSource === "ad") {
-      res.status(403).json({ error: "Usuários do Active Directory não podem alterar o nome via sistema." });
+      if (alterandoSenha) {
+        res.status(403).json({ error: "Usuários do Active Directory têm a senha controlada pelo AD e não podem alterá-la no sistema." });
+        return;
+      }
+      if (name) {
+        res.status(403).json({ error: "Usuários do Active Directory não podem alterar o nome via sistema." });
+        return;
+      }
+      res.status(400).json({ error: "Nada para atualizar." });
       return;
     }
 
+    // ---- Troca de senha (somente locais) ----
+    if (alterandoSenha) {
+      if (!currentPassword) {
+        res.status(400).json({ error: "Informe a senha atual." });
+        return;
+      }
+      if (!newPassword || String(newPassword).length < 8) {
+        res.status(400).json({ error: "A nova senha deve ter no mínimo 8 caracteres." });
+        return;
+      }
+      const senhaAtualOk = await bcrypt.compare(String(currentPassword), user.passwordHash);
+      if (!senhaAtualOk) {
+        res.status(400).json({ error: "Senha atual incorreta." });
+        return;
+      }
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: await bcrypt.hash(String(newPassword), 12) },
+      });
+      await registrarAuditoria(req, "alterar senha", user.email, "troca de senha pelo próprio usuário");
+      res.json({ message: "Senha alterada com sucesso." });
+      return;
+    }
+
+    // ---- Alteração de nome ----
     if (!name || !name.trim()) {
       res.status(400).json({ error: "Nome é obrigatório." });
       return;
@@ -259,7 +310,7 @@ router.post("/sincronizar-unidades", authMiddleware, async (req: Request, res: R
     if (user.role === "admin") {
       unidades = await listarUnidades();
     } else {
-      const sigla = user.email.split("@")[0];
+      const sigla = user.username;
       unidades = await buscarUnidadesDoUsuario(sigla);
     }
 
@@ -268,6 +319,8 @@ router.post("/sincronizar-unidades", authMiddleware, async (req: Request, res: R
         data: { userId, unitId: u.IdUnidade, unitSigla: u.Sigla, unitDesc: u.Descricao },
       });
     }
+
+    await prisma.user.update({ where: { id: userId }, data: { unitsSyncedAt: new Date() } });
 
     await registrarAuditoria(req, "sincronizar minhas unidades", user.email, `${unidades.length} unidade(s) via SEI`);
     res.json({ synced: unidades.length });
@@ -281,6 +334,64 @@ router.post("/sincronizar-unidades", authMiddleware, async (req: Request, res: R
 router.post("/logout", authMiddleware, async (req: Request, res: Response) => {
   await registrarAuditoria(req, "logout", req.user!.email, "sessão encerrada pelo usuário");
   res.json({ message: "Sessão encerrada." });
+});
+
+/** Estatísticas pessoais do usuário logado. */
+router.get("/estatisticas", authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const role = user?.role || "assistente";
+
+    const units = await prisma.userUnit.findMany({ where: { userId } });
+    const siglas = units.map((u) => u.unitSigla);
+
+    // 1) Processos que o usuário consegue visualizar (mesma regra da listagem:
+    //    admin/analista veem todos — inclusive restritos; assistente só as suas unidades)
+    let whereAcesso: any = {};
+    if (role === "assistente") {
+      if (siglas.length === 0) {
+        whereAcesso = { id: "__NO_ACCESS__" };
+      } else {
+        whereAcesso = { OR: siglas.map((s) => ({ unidades: { contains: `"sigla":"${s}"` } })) };
+      }
+    }
+
+    // 2) Processos disponíveis para as unidades do usuário (qualquer papel)
+    const condicoesUnidades = siglas.flatMap((s) => [
+      { unidades: { contains: `"sigla":"${s}"` } },
+      { unidadeAtual: { contains: `"sigla":"${s}"` } },
+    ]);
+    const whereUnidades =
+      condicoesUnidades.length > 0 ? { OR: condicoesUnidades } : { id: "__SEM_UNIDADES__" };
+
+    const [queTenhoAcesso, dasMinhasUnidades, anotacoes] = await Promise.all([
+      prisma.process.count({ where: whereAcesso }),
+      prisma.process.count({ where: whereUnidades }),
+      prisma.annotation.count({ where: { userId } }),
+    ]);
+
+    res.json({ queTenhoAcesso, dasMinhasUnidades, anotacoes });
+  } catch (error) {
+    console.error("[AUTH] Estatísticas error:", error);
+    res.status(500).json({ error: "Erro ao calcular estatísticas." });
+  }
+});
+
+/** Últimas ações do próprio usuário registradas na auditoria (mesmas do log de auditoria). */
+router.get("/atividades", authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const logs = await prisma.auditLog.findMany({
+      where: { userId: req.user!.userId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+
+    res.json({ logs });
+  } catch (error) {
+    console.error("[AUTH] Atividades error:", error);
+    res.status(500).json({ error: "Erro ao buscar atividades." });
+  }
 });
 
 router.get("/sei-unidades", authMiddleware, async (_req: Request, res: Response) => {

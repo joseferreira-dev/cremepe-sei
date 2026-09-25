@@ -107,6 +107,7 @@ export default function Admin({ user, onUserUpdated }: Props) {
     password: '',
     role: 'assistente',
     authSource: 'local' as 'local' | 'ad',
+    username: '',
     active: true,
   });
   const [saving, setSaving] = useState(false);
@@ -332,7 +333,7 @@ export default function Admin({ user, onUserUpdated }: Props) {
   // ---- Modal de usuário ----
   const openNewUser = () => {
     setEditingUser(null);
-    setForm({ name: '', email: '', password: '', role: 'assistente', authSource: 'local', active: true });
+    setForm({ name: '', email: '', password: '', role: 'assistente', authSource: 'local', username: '', active: true });
     setShowUserModal(true);
   };
 
@@ -344,6 +345,7 @@ export default function Admin({ user, onUserUpdated }: Props) {
       password: '',
       role: u.role,
       authSource: u.authSource || 'local',
+      username: u.username ?? '',
       active: u.active,
     });
     setShowUserModal(true);
@@ -373,6 +375,7 @@ export default function Admin({ user, onUserUpdated }: Props) {
       if (editingUser) {
         const payload: Record<string, unknown> = { name: form.name, email: form.email, role: form.role, active: form.active };
         if (form.password) payload.password = form.password;
+        payload.username = form.username.trim();
         const updated = await updateUser(editingUser.id, payload);
         setUsers(users.map((x) => (x.id === editingUser.id ? { ...updated, units: x.units } : x)));
         if (editingUser.id === user.id) {
@@ -386,6 +389,7 @@ export default function Admin({ user, onUserUpdated }: Props) {
           password: form.password || '',
           role: form.role,
           authSource: form.authSource,
+          username: form.username.trim(),
         });
         setUsers([...users, created]);
         dialog.success('Usuário criado.');
@@ -618,6 +622,9 @@ export default function Admin({ user, onUserUpdated }: Props) {
                       >
                         {u.authSource === 'ad' ? 'AD' : 'Local'}
                       </span>
+                      {u.username && (
+                        <p className="text-[10px] font-mono text-gray-400 mt-0.5">{u.username}</p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <button
@@ -1109,6 +1116,22 @@ export default function Admin({ user, onUserUpdated }: Props) {
                   <p className="text-xs text-gray-400 mt-1">Mínimo de {SENHA_MINIMA} caracteres.</p>
                 </div>
               )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Username
+                  <span className="text-xs text-gray-400 font-normal ml-1">(sem @)</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  placeholder="Digite seu nome de usuário"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Identificador usado no login (para AD, é o sAMAccountName). Se vazio, usa o prefixo do e-mail.
+                </p>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Perfil de Acesso</label>
                 <select

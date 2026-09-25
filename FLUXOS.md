@@ -82,24 +82,25 @@ Montagem das rotas no backend (`backend/src/index.ts`):
 
 ### 3.1 Tela de login
 
-- `frontend/src/components/Login.tsx`: campo **Usuário** (sem `@`; o backend completa com `@cremepe.org.br`) + **Senha**; checkbox "Lembrar-me" (apenas visual — o token sempre vai para o `localStorage`).
+- `frontend/src/components/Login.tsx`: campo **Usuário** — informe seu **username** (para AD, o sAMAccountName; ex.: `meduarda`; nunca o prefixo do e-mail por convenção) + **Senha**; checkbox "Lembrar-me" (apenas visual — o token sempre vai para o `localStorage`).
 - Texto de apoio: "Entre com sua senha do Active Directory".
 
-### 3.2 `POST /api/autenticacao/login` — três caminhos
+### 3.2 `POST /api/autenticacao/login` — login por username (local × AD)
 
 ```mermaid
 flowchart TD
-    L["POST /autenticacao/login\n{ email, password }"] --> U{"Usuário existe\nno banco?"}
-    U -->|"authSource = ad"| LDAP["ldapBind (LDAP/AD)\nbind + busca sAMAccountName"]
-    U -->|"authSource = local"| BC["bcrypt.compare"]
-    U -->|"não existe"| LDAP2["ldapBind"]
-    LDAP -->|"falhou"| E401["401 Credenciais inválidas"]
+    L["POST /autenticacao/login\n{ email: username informado, password }"] --> LOOK["Localiza a conta:\n1) username (quando sem @)\n2) e-mail (quando digitado com @)"]
+    LOOK --> U{"Usuário existe\nno banco?"}
+    U -->|"authSource = ad"| LDAP["ldapBind(username da conta)\nA SENHA vem do AD"]
+    U -->|"authSource = local"| BC["bcrypt.compare\nA senha está no sistema"]
+    U -->|"não existe"| LDAP2["ldapBind(username informado)"]
+    LDAP -->|"falhou"| E401["401 Credenciais inválidas\n(auditoria registra o idAd usado)"]
     BC -->|"senha errada"| E401
     LDAP2 -->|"falhou"| E401
     LDAP --> AC{"active?"}
     BC --> AC
     AC -->|"inativo"| E403["403 Conta desativada"]
-    LDAP2 -->|"ok"| NEW["Cria usuário:\nauthSource=ad, role=assistente\n+ sincroniza unidades SEI"]
+    LDAP2 -->|"ok"| NEW["Cria usuário:\nusername=informado, authSource=ad,\nemail = atributo mail do AD\nrole=assistente + unidades SEI"]
     LDAP -->|"ok, nome mudou"| UPD["Atualiza name com displayName"]
     AC -->|"ok"| JWT["sign JWT\n{ userId, email, role }\nexpira em JWT_EXPIRES_IN (24h)"]
     NEW --> JWT
@@ -109,6 +110,11 @@ flowchart TD
 
 Detalhes:
 
+- **`User.username` — identificador único de login para TODOS os usuários** (sem `@`): locais e do AD. **O login é feito por ele**; o e-mail é aceito apenas como **alias de consulta** (se digitado com `@`, a conta é localizada pelo e-mail e o bind usa o `username` armazenado — resolve e-mails incompatíveis, ex.: `meduarda` com e-mail `mmduda@gmail.com` loga como `meduarda`).
+- **A diferença entre as fontes é só onde a senha é validada**: `local` → `bcrypt.compare` no sistema; `ad` → `ldapBind(username)` no Active Directory.
+- **Preenchimento do username**: cadastro na administração (campo **Username**, derivado do prefixo do e-mail se vazio) e 1º login AD (username digitado). Backfill: AD → sAMAccountName atual; locais → prefixo do e-mail.
+- **Busca de unidades** (`buscarUnidadesDoUsuario`) usa `user.username` — no 1º login e em "sincronizar unidades" (perfil e administração).
+- **E-mail no 1º login** vem do atributo `mail` do AD; fallback `username@cremepe.org.br` (com guarda de colisão de e-mail único).
 - **LDAP opcional**: se `LDAP_URL`, `LDAP_BASE_DN` ou `LDAP_DOMAIN` não estiverem no `.env`, `ldapBind` retorna `null` e o login AD falha (só logins locais funcionam).
 - **Primeiro login AD**: usuário é criado com `role: "assistente"` e, em seguida, suas unidades são buscadas no SEI (`buscarUnidadesDoUsuario`) — falha nessa etapa não impede o login (apenas aviso no log).
 - **Caminho local**: `passwordHash` comparado com bcrypt (custo 12 no seed/admin).
@@ -125,9 +131,9 @@ Detalhes:
 | Rota                                      | Descrição                                                                                                               |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `GET /autenticacao/usuario-atual`         | Dados do usuário do token (usado no refresh)                                                                            |
-| `GET /autenticacao/perfil`                | Perfil completo**+ unidades vinculadas** (`user_units`)                                                                 |
-| `PUT /autenticacao/perfil`                | Altera`name` — **bloqueado** para usuários AD (`authSource: ad`)                                                        |
-| `POST /autenticacao/sincronizar-unidades` | Refaz as unidades do usuário:**admin → todas as unidades CREMEPE**; demais → `buscarUnidadesDoUsuario(sigla do e-mail)` |
+| `GET /autenticacao/perfil`                | Perfil completo**+ unidades vinculadas** (`user_units`) + `unitsSyncedAt` + `username`                                  |
+| `PUT /autenticacao/perfil`                | Altera `name` **ou** troca a senha (`currentPassword`/`newPassword`) — **bloqueado** para usuários AD (`authSource: ad`) |
+| `POST /autenticacao/sincronizar-unidades` | Refaz as unidades do usuário:**admin → todas as unidades CREMEPE**; demais → `buscarUnidadesDoUsuario(username)`       |
 | `GET /autenticacao/sei-unidades`          | Lista unidades CREMEPE do SEI (cache)                                                                                   |
 
 ---
@@ -436,7 +442,7 @@ Rotas de listagem especiais no frontend:
 
 | Seção | Endpoints | Ações |
 | ----- | --------- | ----- |
-| **Usuários** | `GET/POST /administracao/usuarios`, `PUT/DELETE /administracao/usuarios/:id` | Busca por nome/e-mail e filtros por perfil/status; criar (local: senha obrigatória **mín. 8 caracteres**, hash bcrypt 12; AD: sem senha), editar papel/ativo/senha, excluir (remove `user_units` em cascata). **Proteções de auto-bloqueio** (front + back): o admin não pode desativar/excluir a si mesmo nem remover o próprio papel `admin` (403). Nome/e-mail de usuários **AD são bloqueados** e a **senha de usuários AD não pode ser criada nem alterada** (403 — é controlada pelo Active Directory). Coluna **Unidades (n)** abre o `MultiSelectDialog` para atribuição manual |
+| **Usuários** | `GET/POST /administracao/usuarios`, `PUT/DELETE /administracao/usuarios/:id` | Busca por nome/e-mail e filtros por perfil/status; criar (local: senha obrigatória **mín. 8 caracteres**, hash bcrypt 12; AD: sem senha), editar papel/ativo/senha, excluir (remove `user_units` em cascata). **Proteções de auto-bloqueio** (front + back): o admin não pode desativar/excluir a si mesmo nem remover o próprio papel `admin` (403). Nome/e-mail de usuários **AD são bloqueados** e a **senha de usuários AD não pode ser criada nem alterada** (403 — é controlada pelo Active Directory). O cadastro/edição (todos os perfis) inclui o campo **"Username"** (sem `@`; identificador de login; derivado do e-mail se vazio; único no banco). Coluna **Unidades (n)** abre o `MultiSelectDialog` para atribuição manual |
 | Unidades de um usuário | `POST /administracao/usuarios/:id/sincronizar-unidades`, `POST /administracao/usuarios/:id/unidades` | Sincronizar via SEI (admin → todas; demais → busca por sigla) **ou** atribuir manualmente (substitui o conjunto atual; catálogo de `GET /sei/unidades`) |
 | **Configurações SEI** | `GET/PUT /administracao/configuracoes`, `POST /administracao/testar-conexao` | Carrega os valores salvos; **banco sobrescreve o `.env` quando não vazio** (`seiConfig` em memória, sem reiniciar); chave de acesso **mascarada** no GET (`********`) e nunca regravada; **"Testar Conexão" é real** — chama o SEI (`listarUnidades`) com os valores do formulário, mesmo ainda não salvos |
 | **Logs de Sincronização** | `GET /administracao/registros` | Filtros (tipo, status, busca por nº/mensagem, período), paginação, **export CSV**, detalhe em diálogo, coluna **Usuário responsável** (`SyncLog.userId`) e link para o processo |
@@ -447,18 +453,24 @@ Rotas de listagem especiais no frontend:
 
 ## 17. Perfil e unidades do usuário
 
-**Tela `/perfil`** (`Profile.tsx`):
+**Tela `/perfil`** (`Profile.tsx`) — mesmo padrão da Administração: **KPIs no topo + barra de abas** (Dados Pessoais | Unidades SEI | Atividades | Preferências), largura total.
 
-1. `GET /autenticacao/perfil` — dados + **unidades vinculadas** (sigla/descrição).
-2. Editar nome — `PUT /autenticacao/perfil` (somente usuários locais; AD retorna 403).
-3. Botão **Sincronizar minhas unidades** — `POST /autenticacao/sincronizar-unidades` (admin → todas as CREMEPE; demais → busca por sigla), mostra quantas unidades foram sincronizadas.
+1. **Aba Dados Pessoais** — grid de 2 colunas: card **Perfil** (avatar, nome, e-mail, perfil, autenticação + **"Editar nome"** via `PUT /autenticacao/perfil`, somente locais; AD exibe "controlado pelo AD" + **expiração da sessão** decodificando o `exp` do JWT no cliente) **ao lado** do card **"O que eu posso acessar"** (descrição do que o papel atual pode fazer). Abaixo, card **Segurança** com botão **"Alterar senha"**.
+2. **Troca de senha em dialog** — o botão abre um **modal** (senha atual/nova/confirmação) que chama `PUT /autenticacao/perfil` com `currentPassword`/`newPassword`: valida a **senha atual** (bcrypt), **mínimo de 8 caracteres** e a confirmação; grava **"alterar senha"** na auditoria (sem valores). **AD**: botão oculto na UI e **403** no backend.
+3. **KPIs** — `GET /autenticacao/estatisticas`:
+   - **Processos que tenho acesso** — os que o usuário consegue **visualizar** (admin/analista: todos, **inclusive os restritos**; assistente: somente os das suas unidades — mesma regra da listagem);
+   - **Processos das minhas unidades** — todos os processos **disponíveis para as unidades do usuário** (`unidades`/`unidadeAtual` intersectando suas siglas), qualquer papel;
+   - **Minhas anotações**.
+4. **Aba Unidades SEI** — contador + **"sincronizadas em …"** (`User.unitsSyncedAt`, preenchido em qualquer sincronização/atribuição de unidades), **busca por sigla/descrição**, grade responsiva (1/2/3 colunas) com scroll e botão **Sincronizar** (`POST /autenticacao/sincronizar-unidades`, admin → todas CREMEPE; demais → busca por sigla no SEI).
+5. **Aba Atividades** — `GET /autenticacao/atividades` → **as mesmas entradas da auditoria** (`audit_logs`) filtradas pelo usuário logado (últimas 20: ação, alvo, detalhe, data/hora).
+6. **Aba Preferências** — **Tema do Sistema** (Claro/Escuro) salvo em `localStorage` (`cremepe_tema`, via `utils/preferences.ts`). O **tema escuro ainda não foi implementado**: a UI avisa que a preferência fica salva e será aplicada quando o modo escuro estiver disponível.
 
 ---
 
 ## 18. Segurança, erros e limites
 
 - **JWT** (segredo `JWT_EXPIRES_IN`, default 24h) verificado em `authMiddleware`; rotas de admin com `adminOnly` adicional.
-- **Senhas**: bcrypt custo 12; usuários AD guardam `passwordHash: ""` (autenticação só no LDAP). Política na administração: **mínimo de 8 caracteres** (criação e redefinição, validado no front e no back).
+- **Senhas**: bcrypt custo 12; usuários AD guardam `passwordHash: ""` (autenticação só no LDAP). Política: **mínimo de 8 caracteres** na criação/redefinição pela administração **e na troca pelo próprio usuário** (perfil), validado no front e no back.
 - **401 global**: dispara a saída automática da sessão no frontend; **403** devolve `{ error }` com a mensagem de acesso.
 - **CORS**: apenas `localhost/127.0.0.1` nas portas `5173` e `8443` (com credenciais).
 - **Uploads**: `multer` em `backend/uploads/`, máx. 50 MB/arquivo, 20 arquivos, lista branca de extensões; arquivos apagados após a geração (`finally`).
@@ -499,9 +511,11 @@ Validação extra: regex `/^\/processo\/[a-f0-9-]+$/` é aceita como detalhe; de
 | POST   | `/login`                | Login (local ou AD) → JWT |
 | POST   | `/logout`               | Registra o encerramento da sessão (auditoria; o JWT segue válido até expirar) |
 | GET    | `/usuario-atual`        | Usuário do token          |
-| GET    | `/perfil`               | Perfil + unidades         |
-| PUT    | `/perfil`               | Atualiza nome (local)     |
-| POST   | `/sincronizar-unidades` | Refaz minhas unidades     |
+| GET    | `/perfil`               | Perfil + unidades + `unitsSyncedAt` |
+| PUT    | `/perfil`               | Atualiza nome **ou** troca senha (`currentPassword`/`newPassword`, mín. 8, locais; AD → 403) |
+| GET    | `/estatisticas`         | Estatísticas pessoais (processos que tenho acesso, das minhas unidades, minhas anotações) |
+| GET    | `/atividades`           | Últimas 20 ações do usuário na auditoria (mesmo conteúdo do log) |
+| POST   | `/sincronizar-unidades` | Refaz minhas unidades (grava `unitsSyncedAt`) |
 | GET    | `/sei-unidades`         | Unidades CREMEPE do SEI   |
 
 ### `/api/processos`
@@ -569,5 +583,7 @@ Itens conhecidos do estado atual (úteis para manutenção):
 7. **Filtro por unidade** usa _contains_ em JSON (`"sigla":"X"`), sensível a grafias exatas.
 8. **Documentos do SEI** — há funções prontas (`consultarDocumento`, `obterLinkDocumento`, `extrairDocumentos`) ainda sem endpoint/uso na UI.
 9. **`docs` desatualizados removidos** — o antigo `fluxo-importacao-sincronizacao.md` foi substituído por este arquivo; a especificação original (`frontend/src/imports/ESPECIFICACAO.md`) é o documento de planejamento e diverge da stack real em alguns pontos (ver nota no topo desse arquivo).
+10. **Tema escuro pendente** — a preferência já é coletada e salva no Perfil (`localStorage` `cremepe_tema`), mas a aplicação do modo escuro **ainda não foi implementada** (próxima etapa).
+11. **`username` legado (backfill)** — na migration `user_username`, contas AD receberam `username` = sAMAccountName (campo anterior) e locais receberam o **prefixo do e-mail**; se algum não seguir a convenção, corrija no modal de usuários da administração (campo "Username") — ele também é usado na busca de unidades no SEI.
 
 > Mantenha este documento sincronizado ao alterar rotas, permissões ou fluxos principais.

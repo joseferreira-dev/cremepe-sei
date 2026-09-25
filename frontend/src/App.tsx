@@ -42,7 +42,7 @@ function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User)
         <Route path="/sincronizacao" element={<SyncPage user={user} />} />
         <Route path="/parados" element={<StalledProcesses />} />
         <Route path="/administracao" element={<Admin user={user} onUserUpdated={setUser} />} />
-        <Route path="/perfil" element={<Profile user={user} />} />
+        <Route path="/perfil" element={<Profile user={user} onUserUpdated={setUser} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

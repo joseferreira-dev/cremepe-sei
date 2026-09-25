@@ -1,4 +1,4 @@
-import type { Process, User, UserUnit, Tag, Annotation, SyncLog, AuditoriaLog, Paginacao, SistemaInfo } from './types';
+import type { Process, User, UserUnit, Tag, Annotation, SyncLog, AuditoriaLog, Paginacao, SistemaInfo, EstatisticasPerfil } from './types';
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string) || 'http://127.0.0.1:8000/api';
 
@@ -110,6 +110,24 @@ export async function updateProfile(data: { name: string }): Promise<User> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
+}
+
+export async function alterarSenha(data: { currentPassword: string; newPassword: string }): Promise<{ message: string }> {
+  return request<{ message: string }>('/autenticacao/perfil', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function fetchEstatisticas(): Promise<EstatisticasPerfil> {
+  return request<EstatisticasPerfil>('/autenticacao/estatisticas');
+}
+
+/** Últimas ações do próprio usuário na auditoria (mesmo conteúdo do log de auditoria). */
+export async function fetchAtividades(): Promise<AuditoriaLog[]> {
+  const data = await request<{ logs: AuditoriaLog[] }>('/autenticacao/atividades');
+  return data.logs;
 }
 
 export async function syncMyUnits(): Promise<{ synced: number }> {
@@ -445,6 +463,7 @@ export async function createUser(data: {
   password: string;
   role: string;
   authSource?: string;
+  username?: string;
 }): Promise<User> {
   return request<User>('/administracao/usuarios', {
     method: 'POST',
@@ -455,7 +474,7 @@ export async function createUser(data: {
 
 export async function updateUser(
   id: string,
-  data: { name?: string; email?: string; role?: string; active?: boolean; password?: string }
+  data: { name?: string; email?: string; role?: string; active?: boolean; password?: string; username?: string }
 ): Promise<User> {
   return request<User>(`/administracao/usuarios/${id}`, {
     method: 'PUT',
