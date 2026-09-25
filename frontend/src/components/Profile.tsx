@@ -24,7 +24,7 @@ const permissoesPorPapel: Record<string, string> = {
   admin:
     'Acesso total: visualiza e sincroniza todos os processos (inclusive finalizados), gerencia usuários, unidades, configurações, logs e auditoria, e pode excluir processos.',
   analista:
-    'Vê todos os processos; processos de acesso Restrito fora das suas unidades aparecem apenas com dados básicos (sem detalhes). Pode gerar resumos, anotações e sincronizar.',
+    'Vê todos os processos com dados completos — igual ao administrador na leitura (inclusive processos Restritos fora das suas unidades). Pode cadastrar, editar, anotar, gerar resumos e sincronizar; NÃO pode excluir processos, sincronizar finalizados nem acessar a administração.',
   assistente:
     'Vê somente os processos das unidades SEI vinculadas ao seu perfil. Sem unidade vinculada, nenhum processo é exibido.',
 };

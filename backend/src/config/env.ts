@@ -25,7 +25,6 @@ export const env = {
   // limite de uso, indisponibilidade ou remoção do modelo).
   LLM_MODEL: process.env.LLM_MODEL
     || "gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite",
-  LLM_BASE_URL: process.env.LLM_BASE_URL || "",
 
   JWT_SECRET: process.env.JWT_SECRET || "cremepe-sei-dev-secret",
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "24h",

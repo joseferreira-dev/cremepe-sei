@@ -20,7 +20,7 @@ export interface UserUnit {
   unitDesc: string;
 }
 
-export type ProcessStatus = 'em_andamento' | 'finalizado' | 'pendente' | 'sobrestado';
+export type ProcessStatus = 'em_andamento' | 'finalizado';
 
 export interface Tag {
   id: string;
@@ -60,7 +60,6 @@ export interface Process {
   tags: Tag[];
   annotations: Annotation[];
   createdAt: string;
-  acessoRestrito?: boolean;
 }
 
 export interface SyncLog {
@@ -69,7 +68,7 @@ export interface SyncLog {
   numeroSei?: string;
   userId?: string | null;
   userName?: string | null;
-  tipo: 'manual' | 'batch' | 'auto';
+  tipo: 'manual' | 'batch';
   status: 'success' | 'error';
   mensagem: string;
   executedAt: string;

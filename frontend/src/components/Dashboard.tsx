@@ -21,8 +21,6 @@ import Spinner from './ui/Spinner';
 const statusConfig: Record<string, { label: string; color: string }> = {
   em_andamento: { label: 'Em Andamento', color: '#29ABE2' },
   finalizado: { label: 'Finalizado', color: '#009C60' },
-  pendente: { label: 'Pendente', color: '#F59E0B' },
-  sobrestado: { label: 'Sobrestado', color: '#6B7280' },
 };
 
 const unitColors = ['#009C60', '#29ABE2', '#8DC63F', '#F59E0B', '#6366F1'];

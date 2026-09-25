@@ -17,15 +17,11 @@ import {
 const STATUS_LABELS: Record<ProcessStatus, string> = {
   em_andamento: 'Em Andamento',
   finalizado: 'Finalizado',
-  pendente: 'Pendente',
-  sobrestado: 'Sobrestado',
 };
 
 const STATUS_COLORS: Record<string, string> = {
   em_andamento: '#29ABE2',
   finalizado: '#009C60',
-  pendente: '#F59E0B',
-  sobrestado: '#6B7280',
 };
 
 const NIVEL_COLORS: Record<string, string> = {

@@ -44,10 +44,7 @@ export default function NewProcess() {
 
       try {
         const process = await createProcess(num);
-        let msg = `Processo ${process.numeroSei} importado com sucesso.`;
-        if (process.autoImportados && process.autoImportados > 0) {
-          msg += ` ${process.autoImportados} processo(s) relacionado(s) importado(s).`;
-        }
+        const msg = `Processo ${process.numeroSei} importado com sucesso.`;
         setResults((prev) => [
           ...prev,
           { numero: num, status: 'success', mensagem: msg },

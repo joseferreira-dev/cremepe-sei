@@ -12,7 +12,7 @@ model User {
   name         String
   email        String    @unique
   passwordHash String    @default("") @map("password_hash")
-  role         String    @default("analista") // admin, protocolo, analista, gestor
+  role         String    @default("analista") // admin, analista, assistente
   authSource   String    @default("local") @map("auth_source") // local ou ad
   username     String    @unique // identificador de login (sAMAccountName para AD)
   active       Boolean   @default(true)
@@ -48,14 +48,12 @@ model Process {
   dataAutuacao      String?   @map("data_autuacao")
   nivelAcesso       String?   @map("nivel_acesso")
   linkSei           String?   @map("link_sei")
-  idHipoteseLegal   String?   @map("id_hipotese_legal")
   assuntos          String    @default("[]") // JSON array as string
   interessados      String    @default("[]") // JSON array as string
   unidadeAtual      String?   @map("unidade_atual") // JSON object as string
   unidades          String    @default("[]") // JSON array of units as string
   unidadeSincronizacao String? @map("unidade_sincronizacao") // JSON: units that successfully returned data on last sync
   andamentos        String    @default("[]") // JSON array of andamentos (movements) as string
-  documentos        String    @default("[]") // JSON array of documents extracted from andamentos
   procedimentosRelacionados String @default("[]") @map("procedimentos_relacionados") // JSON array
   procedimentosAnexados     String @default("[]") @map("procedimentos_anexados")     // JSON array
   ultimoAndamento   String?   @map("ultimo_andamento") // JSON object as string
@@ -113,7 +111,7 @@ model SyncLog {
   processId String?   @map("process_id")
   numeroSei String?   @map("numero_sei")
   userId    String?   @map("user_id")
-  tipo      String    // manual, batch, auto
+  tipo      String    // manual, batch
   status    String    // success, error
   mensagem  String
   executedAt DateTime @default(now()) @map("executed_at")

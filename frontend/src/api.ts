@@ -158,15 +158,12 @@ interface BackendProcess {
   createdAt: string;
   tags: Tag[];
   annotations: Annotation[];
-  acessoRestrito?: boolean;
 }
 
 function mapStatus(raw: string): Process['status'] {
   const s = raw.toLowerCase().trim();
   if (s === 'em_analise' || s === 'em_andamento') return 'em_andamento';
   if (s === 'finalizado' || s === 'concluido') return 'finalizado';
-  if (s === 'pendente') return 'pendente';
-  if (s === 'sobrestado') return 'sobrestado';
   return 'em_andamento';
 }
 
@@ -194,7 +191,6 @@ export function mapProcess(p: BackendProcess): Process {
     tags: Array.isArray(p.tags) ? p.tags : [],
     annotations: Array.isArray(p.annotations) ? p.annotations : [],
     createdAt: p.createdAt,
-    acessoRestrito: Boolean(p.acessoRestrito),
   };
 }
 
@@ -274,13 +270,13 @@ export async function findProcessByNumero(numeroSei: string): Promise<Process | 
   return found ? mapProcess(found) : null;
 }
 
-export async function createProcess(numeroSei: string): Promise<Process & { autoImportados?: number }> {
-  const data = await request<BackendProcess & { autoImportados?: number }>('/processos', {
+export async function createProcess(numeroSei: string): Promise<Process> {
+  const data = await request<BackendProcess>('/processos', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ numeroSei }),
   });
-  return { ...mapProcess(data), autoImportados: data.autoImportados };
+  return mapProcess(data);
 }
 
 export async function syncProcess(id: string): Promise<Process> {
@@ -290,7 +286,7 @@ export async function syncProcess(id: string): Promise<Process> {
   return mapProcess(data);
 }
 
-export async function syncBatch(ids: string[]): Promise<{ results: { id: string; status: string; mensagem: string }[]; total: number; autoImportados: number }> {
+export async function syncBatch(ids: string[]): Promise<{ results: { id: string; status: string; mensagem: string }[]; total: number }> {
   return request(`/processos/sincronizar-lote`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -314,19 +310,6 @@ export async function deleteProcess(id: string): Promise<void> {
   await request(`/processos/${id}`, { method: 'DELETE' });
 }
 
-export async function batchImport(
-  numeros: string[]
-): Promise<{
-  results: { numero: string; status: string; mensagem: string }[];
-  summary: { total: number; successes: number; errors: number };
-}> {
-  return request('/processos/importar', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ numeros }),
-  });
-}
-
 export async function generateSummary(
   id: string,
   files: File[],
@@ -347,16 +330,6 @@ export async function saveSummary(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ resumo }),
   });
-}
-
-export async function generateSummaryFromDocs(id: string): Promise<{ resumo: string }> {
-  return request(`/processos/${id}/resumo-documentos`, { method: 'POST' });
-}
-
-export async function getSummary(
-  id: string
-): Promise<{ resumoIa: string | null; resumoGeradoEm: string | null }> {
-  return request(`/processos/${id}/resumo`);
 }
 
 /** Registra na auditoria um download/exportação (panorama de processo ou relatório). */
@@ -399,20 +372,6 @@ export async function updateAnnotation(
 
 export async function deleteAnnotation(processId: string, annotationId: string): Promise<void> {
   await request(`/processos/${processId}/anotacoes/${annotationId}`, { method: 'DELETE' });
-}
-
-// ---- Andamentos ----
-export interface Andamento {
-  IdAndamento: string;
-  Descricao: string;
-  DataHora: string;
-  Usuario: { Sigla: string; Nome: string } | null;
-  Unidade: { IdUnidade: string; Sigla: string; Descricao: string } | null;
-}
-
-export async function listAndamentos(processId: string): Promise<Andamento[]> {
-  const data = await request<{ andamentos: Andamento[] }>(`/processos/${processId}/andamentos`);
-  return data.andamentos || [];
 }
 
 export interface ProcessoPai {

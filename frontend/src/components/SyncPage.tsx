@@ -109,7 +109,6 @@ export default function SyncPage({ user }: { user: User }) {
     setSyncProgress({ done: 0, total });
     let erros = 0;
     let synced = 0;
-    let totalAutoImportados = 0;
     try {
       let pageToFetch = 1;
       let hasMore = true;
@@ -135,7 +134,6 @@ export default function SyncPage({ user }: { user: User }) {
           const falhas = result.results.filter((r) => r.status === "error");
           erros += falhas.length;
           synced += result.results.length;
-          totalAutoImportados += result.autoImportados || 0;
           setSyncProgress({ done: synced, total });
         }
         hasMore = sindicaveis.length === 500;
@@ -144,9 +142,6 @@ export default function SyncPage({ user }: { user: User }) {
       let msg = erros > 0
         ? `Sincronização concluída. ${erros} processo(s) falharam.`
         : 'Todos os processos filtrados foram sincronizados com sucesso.';
-      if (totalAutoImportados > 0) {
-        msg += ` ${totalAutoImportados} processo(s) relacionado(s) importado(s) automaticamente.`;
-      }
       dialog.success(msg);
       load();
     } catch (e: any) {
@@ -160,10 +155,7 @@ export default function SyncPage({ user }: { user: User }) {
   const handleSyncOne = async (p: Process) => {
     setSyncingId(p.id);
     try {
-      const result = await syncProcess(p.id) as any;
-      if (result.autoImportados > 0) {
-        dialog.success(`${p.numeroSei} sincronizado. ${result.autoImportados} processo(s) relacionado(s) importado(s).`);
-      }
+      await syncProcess(p.id);
       load();
     } catch (e: any) {
       dialog.error(e?.message || `Erro ao sincronizar ${p.numeroSei}.`);
@@ -424,14 +416,12 @@ export default function SyncPage({ user }: { user: User }) {
                     <td className="px-4 py-3">
                       <button
                         onClick={() => handleSyncOne(p)}
-                        disabled={syncingId === p.id || syncingAll || Boolean(p.acessoRestrito) || (isConcluido && user.role !== 'admin')}
+                        disabled={syncingId === p.id || syncingAll || (isConcluido && user.role !== 'admin')}
                         className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
                         title={
-                          p.acessoRestrito
-                            ? 'Você não tem acesso a este processo restrito'
-                            : isConcluido && user.role !== 'admin'
-                            ? 'Somente administradores podem sincronizar processos finalizados'
-                            : ''
+                          isConcluido && user.role !== 'admin'
+                          ? 'Somente administradores podem sincronizar processos finalizados'
+                          : ''
                         }
                       >
                         {syncingId === p.id ? (

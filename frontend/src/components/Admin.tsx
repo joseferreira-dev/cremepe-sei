@@ -32,7 +32,6 @@ const CHAVE_MASCARADA = '********';
 const LOG_TIPO_LABELS: Record<string, string> = {
   manual: 'Manual',
   batch: 'Lote',
-  auto: 'Automática',
 };
 
 interface Props {
@@ -789,7 +788,6 @@ export default function Admin({ user, onUserUpdated }: Props) {
               <option value="all">Todos os tipos</option>
               <option value="manual">Manual</option>
               <option value="batch">Lote</option>
-              <option value="auto">Automática</option>
             </select>
             <select
               value={logFilters.status}

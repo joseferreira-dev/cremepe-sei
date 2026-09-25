@@ -17,32 +17,10 @@ async function main() {
       passwordHash: adminPasswordHash,
       role: "admin",
       authSource: "local",
+      username: "admin",
     },
   });
   console.log("[SEED] Usuário admin criado: admin@cremepe.org.br / admin123");
-
-  // Create default users
-  const users = [
-    { name: "Ana Paula Ferreira", email: "ana.ferreira@cremepe.org.br", role: "admin" },
-    { name: "Carlos Eduardo Silva", email: "carlos.silva@cremepe.org.br", role: "assistente" },
-    { name: "Mariana Costa", email: "mariana.costa@cremepe.org.br", role: "analista" },
-  ];
-
-  const defaultPassword = await bcrypt.hash("123456", 12);
-  for (const u of users) {
-    await prisma.user.upsert({
-      where: { email: u.email },
-      update: {},
-      create: {
-        name: u.name,
-        email: u.email,
-        passwordHash: defaultPassword,
-        role: u.role,
-        authSource: "local",
-      },
-    });
-  }
-  console.log("[SEED] Usuários padrão criados (senha: 123456)");
 
   // Create default tags
   const tags = [

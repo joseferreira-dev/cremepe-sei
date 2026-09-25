@@ -31,7 +31,6 @@ Sistema de Gestão Inteligente de Processos do **CREMEPE** (Conselho Regional de
 ## Documentação
 
 - **[`FLUXOS.md`](./FLUXOS.md)** — todos os fluxos do sistema em detalhe: autenticação (local/AD), permissões, cadastro e importação, sincronização com o SEI, resumo com IA, anotações, tags, dashboard, relatórios, administração, mapa de rotas e tabela completa de endpoints.
-- **[`frontend/src/imports/ESPECIFICACAO.md`](./frontend/src/imports/ESPECIFICACAO.md)** — especificação original de planejamento (alguns pontos divergem da implementação atual; veja a nota no topo do arquivo).
 
 > A API usa **endpoints em português** (`/api/autenticacao`, `/api/processos`, `/api/etiquetas`, `/api/administracao`, `/api/sei`) e as rotas do frontend também (`/processos`, `/relatorios`, `/sincronizacao`...). Após mudanças de rota, reinicie backend e frontend.
 
@@ -58,10 +57,8 @@ SEI_IDENTIFICACAO_SERVICO=<sua-chave-de-acesso>
 SEI_ID_UNIDADE=110002083
 
 # LLM
-LLM_PROVIDER=gemini
 LLM_API_KEY=<sua-api-key>
 LLM_MODEL=gemini-3.1-pro-preview
-LLM_BASE_URL=
 
 # Auth
 JWT_SECRET=<segredo-jwt>
@@ -96,7 +93,7 @@ pnpm prisma migrate dev
 # ou, se já houver migração:
 pnpm prisma db push
 
-# Executar o seed (usuários e tags iniciais)
+# Executar o seed (administrador e tags iniciais)
 pnpm prisma db seed
 
 # Iniciar o servidor na porta 8000

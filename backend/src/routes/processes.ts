@@ -36,7 +36,6 @@ router.use(authMiddleware);
 interface SyncResult {
   status: "success" | "skipped" | "error";
   mensagem: string;
-  autoImportados?: number;
 }
 
 interface ProcessoAcesso {
@@ -60,13 +59,14 @@ function verificarAcessoProcesso(
   userUnitSiglas: string[],
 ): { permitido: boolean; motivo?: string } {
   if (userRole === "admin") return { permitido: true };
-  const isInUserUnits = siglasDoProcesso(process).some((s) => userUnitSiglas.includes(s));
-  if (userRole === "assistente" && !isInUserUnits) {
-    return { permitido: false, motivo: "Acesso negado a este processo." };
+  if (userRole === "assistente") {
+    const isInUserUnits = siglasDoProcesso(process).some((s) => userUnitSiglas.includes(s));
+    if (!isInUserUnits) {
+      return { permitido: false, motivo: "Acesso negado a este processo." };
+    }
   }
-  if (userRole === "analista" && process.nivelAcesso?.includes("Restrito") && !isInUserUnits) {
-    return { permitido: false, motivo: "Acesso restrito a este processo." };
-  }
+  // Demais papéis (ex.: analista) têm visibilidade e operação completas —
+  // sem restrição por unidade ou nível de acesso (só as ações exclusivas de admin são negadas à parte)
   return { permitido: true };
 }
 
@@ -176,15 +176,12 @@ async function syncProcesso(procId: string): Promise<SyncResult> {
     parentStatusMap,
   );
 
-  let autoImportados = 0;
-  // Auto-import removed — related processes are shown but not imported into the DB
-
   if (!andamentoMudou && !paiFinalizado && andamentosSync.length === 0 && concluido === (proc.statusSistema === "finalizado")) {
     await prisma.process.update({
       where: { id: proc.id },
       data: { sincronizadoEm: new Date() },
     });
-    return { status: "success", mensagem: "Sincronizado. Sem alterações.", autoImportados };
+    return { status: "success", mensagem: "Sincronizado. Sem alterações." };
   }
 
   await prisma.process.update({
@@ -210,10 +207,8 @@ async function syncProcesso(procId: string): Promise<SyncResult> {
     },
   });
 
-  return { status: "success", mensagem: "Sincronizado.", autoImportados };
+  return { status: "success", mensagem: "Sincronizado." };
 }
-
-// Auto-import removed — related processes are shown but not imported into the DB
 
 // List processes with pagination, search, and filters
 router.get("/", async (req: Request, res: Response) => {
@@ -368,20 +363,6 @@ router.get("/", async (req: Request, res: Response) => {
         ultimoAndamento: p.ultimoAndamento ? JSON.parse(p.ultimoAndamento) : null,
         tags: p.tags.map((pt) => pt.tag),
       };
-      if (userRole === "analista" && p.nivelAcesso?.includes("Restrito")) {
-        const isInUserUnits = siglasDoProcesso(p).some((s) => userUnitSiglas.includes(s));
-        if (!isInUserUnits) {
-          return {
-            id: p.id,
-            numeroSei: p.numeroSei,
-            nivelAcesso: p.nivelAcesso,
-            statusSistema: p.statusSistema,
-            unidades: full.unidades,
-            unidadeAtual: full.unidadeAtual,
-            acessoRestrito: true,
-          };
-        }
-      }
       return full;
     });
 
@@ -528,19 +509,6 @@ router.get("/:id", async (req: Request, res: Response) => {
       if (userRole === "assistente") {
         if (!isInUserUnits) {
           res.status(403).json({ error: "Acesso negado a este processo." });
-          return;
-        }
-      } else if (userRole === "analista") {
-        if (process.nivelAcesso?.includes("Restrito") && !isInUserUnits) {
-          const unidades = JSON.parse(process.unidades || "[]");
-          res.json({
-            id: process.id,
-            numeroSei: process.numeroSei,
-            nivelAcesso: process.nivelAcesso,
-            statusSistema: process.statusSistema,
-            unidades,
-            acessoRestrito: true,
-          });
           return;
         }
       }
@@ -786,184 +754,10 @@ router.post("/", async (req: Request, res: Response) => {
 
     await registrarAuditoria(req, "cadastrar processo", numeroSei, "cadastro manual via consulta ao SEI");
 
-    res.status(201).json({ ...processo, autoImportados: 0 });
+    res.status(201).json(processo);
   } catch (error) {
     console.error("[PROCESSES] Create error:", error);
     res.status(500).json({ error: "Erro ao cadastrar processo." });
-  }
-});
-
-// Batch import
-router.post("/importar", async (req: Request, res: Response) => {
-  try {
-    const { numeros } = req.body;
-
-    if (!Array.isArray(numeros) || numeros.length === 0) {
-      res.status(400).json({ error: "Lista de números é obrigatória." });
-      return;
-    }
-
-    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
-    const userRole = user?.role || "assistente";
-
-    const userUnits = await prisma.userUnit.findMany({ where: { userId: req.user!.userId } });
-    const userUnitSiglas = userUnits.map((u) => u.unitSigla);
-
-    // Busca unidades UMA ÚNICA VEZ antes do loop (cachê de 5min)
-    let todasUnidadesGlobal: any[] = [];
-    try {
-      todasUnidadesGlobal = await listarUnidades();
-    } catch { /* ignore */ }
-
-    const results: { numero: string; status: string; mensagem: string; processId?: string }[] = [];
-
-    // Importação paralela com concorrência limitada (5 simultâneos)
-    const CONCURRENCY = 5;
-    const processarNumero = async (num: string) => {
-      try {
-        const existing = await prisma.process.findUnique({ where: { numeroSei: num } });
-        if (existing) {
-          return { numero: num, status: "skipped", mensagem: "Já cadastrado.", processId: existing.id };
-        }
-
-        let seiData;
-        try {
-          seiData = await consultarProcedimento(num);
-        } catch {
-          return { numero: num, status: "error", mensagem: "Processo não encontrado no SEI." };
-        }
-
-        const unidadesAbertasBatch = (seiData.UnidadesProcedimentoAberto || []).map((u) => ({
-          id: u.Unidade.IdUnidade,
-          sigla: u.Unidade.Sigla,
-          descricao: u.Unidade.Descricao,
-        }));
-
-        if (userRole !== "admin") {
-          const hasAccess = unidadesAbertasBatch.some((u: any) => userUnitSiglas.includes(u.sigla));
-          if (!hasAccess) {
-            return { numero: num, status: "error", mensagem: "Processo não encontrado nas suas unidades vinculadas." };
-          }
-        }
-
-        // Busca andamentos: unidades abertas ou cascata completa (para processos finalizados)
-        let andamentosBatch: any[] = [];
-        let unidadesComDadosBatch: string[] = [];
-        const unidadesParaBuscarBatch = unidadesAbertasBatch.length > 0
-          ? unidadesAbertasBatch.map((u) => ({ IdUnidade: u.id, Sigla: u.sigla, Descricao: u.descricao }))
-          : montarUnidadesParaBusca(null, [], todasUnidadesGlobal);
-        try {
-          andamentosBatch = await listarAndamentos(num, unidadesParaBuscarBatch);
-          if (andamentosBatch.length > 0) {
-            unidadesComDadosBatch = Array.from(new Set(andamentosBatch.map((a: any) => a.Unidade?.IdUnidade).filter(Boolean)));
-          }
-        } catch { /* falha não impede importação */ }
-
-        const concluidoBatch = isProcessoConcluido(
-          unidadesAbertasBatch,
-          seiData.UltimoAndamento ? { descricao: seiData.UltimoAndamento.Descricao } : null,
-          (seiData.ProcedimentosRelacionados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
-          (seiData.ProcedimentosAnexados || []).map((p) => ({ id: p.IdProcedimento, numero: p.ProcedimentoFormatado, tipo: "" })),
-        );
-
-        // Otimização: herança - busca apenas processos finalizados
-        let paiFinalizadoBatch = false;
-        if (!concluidoBatch) {
-          const finalizedProcs = await prisma.process.findMany({
-            where: { statusSistema: "finalizado" },
-            select: { procedimentosAnexados: true },
-          });
-          for (const other of finalizedProcs) {
-            try {
-              const anexados = JSON.parse(other.procedimentosAnexados || "[]");
-              if (anexados.some((a: any) => a.numero === num)) {
-                paiFinalizadoBatch = true;
-                break;
-              }
-            } catch { /* ignore */ }
-          }
-        }
-
-        const processo = await prisma.process.create({
-          data: {
-            numeroSei: num,
-            tipo: seiData.TipoProcedimento?.Nome || null,
-            especificacao: seiData.Especificacao || null,
-            statusSistema: (concluidoBatch || paiFinalizadoBatch) ? "finalizado" : "em_andamento",
-            dataAutuacao: seiData.DataAutuacao || null,
-            nivelAcesso: seiData.NivelAcesso || null,
-            linkSei: seiData.LinkAcesso || null,
-            assuntos: JSON.stringify(seiData.Assuntos?.map((a) => a.Descricao) || []),
-            interessados: JSON.stringify(seiData.Interessados?.map((i) => i.Nome) || []),
-            unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({
-              id: seiData.UnidadeAtual.IdUnidade,
-              sigla: seiData.UnidadeAtual.Sigla,
-              descricao: seiData.UnidadeAtual.Descricao,
-            }) : null,
-            unidades: JSON.stringify(unidadesAbertasBatch.length > 0 ? unidadesAbertasBatch : unidadesDeHistorico(andamentosBatch)),
-            unidadeSincronizacao: unidadesComDadosBatch.length > 0 ? JSON.stringify(unidadesComDadosBatch.map((id) => ({ id }))) : null,
-            andamentos: JSON.stringify(andamentosBatch.map((a) => ({
-              id: a.IdAndamento,
-              descricao: a.Descricao,
-              dataHora: a.DataHora,
-              usuario: a.Usuario?.Nome || "",
-              unidade: a.Unidade?.Sigla || "",
-            }))),
-            procedimentosRelacionados: JSON.stringify((seiData.ProcedimentosRelacionados || []).map((p) => ({
-              id: p.IdProcedimento,
-              numero: p.ProcedimentoFormatado,
-              tipo: p.TipoProcedimento?.Nome || "",
-            }))),
-            procedimentosAnexados: JSON.stringify((seiData.ProcedimentosAnexados || []).map((p) => ({
-              id: p.IdProcedimento,
-              numero: p.ProcedimentoFormatado,
-              tipo: p.TipoProcedimento?.Nome || "",
-            }))),
-            ultimoAndamento: seiData.UltimoAndamento ? JSON.stringify({
-              descricao: seiData.UltimoAndamento.Descricao,
-              dataHora: seiData.UltimoAndamento.DataHora,
-              usuario: seiData.UltimoAndamento.Usuario?.Nome || "",
-              unidade: seiData.UltimoAndamento.Unidade?.Sigla || "",
-            }) : null,
-            sincronizadoEm: new Date(),
-          },
-        });
-
-        return { numero: num, status: "success", mensagem: "Importado com sucesso.", processId: processo.id };
-      } catch (err: any) {
-        return { numero: num, status: "error", mensagem: err.message };
-      }
-    };
-
-    // Executa em paralelo com concorrência limitada
-    const numerosLimpos = numeros.map((n: string) => n.trim()).filter(Boolean);
-    for (let i = 0; i < numerosLimpos.length; i += CONCURRENCY) {
-      const lote = numerosLimpos.slice(i, i + CONCURRENCY);
-      const resultadosLote = await Promise.all(lote.map(processarNumero));
-      results.push(...resultadosLote);
-    }
-
-    const autoImportados = 0;
-    const autoImportNumeros: string[] = [];
-
-    const successes = results.filter((r) => r.status === "success").length;
-    const errors = results.filter((r) => r.status === "error").length;
-
-    await prisma.syncLog.create({
-      data: {
-        tipo: "batch",
-        userId: req.user!.userId,
-        status: errors === 0 ? "success" : "error",
-        mensagem: `Importação em lote: ${numeros.length} processos processados, ${successes} importados, ${errors} falhas.`,
-      },
-    });
-
-    await registrarAuditoria(req, "importar processos", `${successes}/${numeros.length} processos`, `${errors} falha(s) na importação em lote`);
-
-    res.json({ results, summary: { total: numeros.length, successes, errors, autoImportados, autoImportNumeros } });
-  } catch (error) {
-    console.error("[PROCESSES] Import error:", error);
-    res.status(500).json({ error: "Erro na importação em lote." });
   }
 });
 
@@ -986,7 +780,7 @@ router.post("/sincronizar-lote", async (req: Request, res: Response) => {
     try { todasUnidades = await listarUnidades(); } catch { /* ignore */ }
 
     const CONCURRENCY = 5;
-    const results: { id: string; status: string; mensagem: string; autoImportados?: number }[] = [];
+    const results: { id: string; status: string; mensagem: string }[] = [];
 
     for (let i = 0; i < ids.length; i += CONCURRENCY) {
       const lote = ids.slice(i, i + CONCURRENCY);
@@ -1008,8 +802,7 @@ router.post("/sincronizar-lote", async (req: Request, res: Response) => {
       results.push(...resultadosLote);
     }
 
-    const totalAutoImportados = results.reduce((acc, r) => acc + (r.autoImportados || 0), 0);
-    res.json({ results, total: ids.length, autoImportados: totalAutoImportados });
+    res.json({ results, total: ids.length });
   } catch (error) {
     console.error("[PROCESSES] Batch sync error:", error);
     res.status(500).json({ error: "Erro na sincronização em lote." });
@@ -1107,9 +900,8 @@ router.post("/:id/sincronizar", async (req: Request, res: Response) => {
       procedimentosRelacionados: JSON.parse(full!.procedimentosRelacionados || "[]"),
       procedimentosAnexados: JSON.parse(full!.procedimentosAnexados || "[]"),
       ultimoAndamento: full!.ultimoAndamento ? JSON.parse(full!.ultimoAndamento) : null,
-      tags: full!.tags.map((pt) => pt.tag),
-      autoImportados: result.autoImportados || 0,
-    });
+        tags: full!.tags.map((pt) => pt.tag),
+      });
   } catch (error) {
     console.error("[PROCESSES] Sync error:", error);
     res.status(500).json({ error: "Erro ao sincronizar com SEI." });
@@ -1135,6 +927,10 @@ router.put("/:id", async (req: Request, res: Response) => {
 
     const updateData: any = {};
     const mudancas: string[] = [];
+    if (statusSistema && !["em_andamento", "finalizado", "em_analise"].includes(statusSistema)) {
+      res.status(400).json({ error: "Status inválido. Use 'em_andamento' ou 'finalizado'." });
+      return;
+    }
     if (statusSistema && statusSistema !== process.statusSistema) {
       updateData.statusSistema = statusSistema;
       mudancas.push(`status: ${process.statusSistema} → ${statusSistema}`);

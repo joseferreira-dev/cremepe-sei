@@ -394,20 +394,4 @@ router.get("/atividades", authMiddleware, async (req: Request, res: Response) =>
   }
 });
 
-router.get("/sei-unidades", authMiddleware, async (_req: Request, res: Response) => {
-  try {
-    const unidades = await listarUnidades();
-    res.json({
-      unidades: unidades.map((u) => ({
-        id: u.IdUnidade,
-        sigla: u.Sigla,
-        descricao: u.Descricao,
-      })),
-    });
-  } catch (error: any) {
-    console.error("[AUTH] Listar unidades SEI error:", error);
-    res.status(500).json({ error: `Erro ao listar unidades do SEI: ${error.message}` });
-  }
-});
-
 export default router;

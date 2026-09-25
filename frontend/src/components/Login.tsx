@@ -9,7 +9,6 @@ interface Props {
 export default function Login({ onLogin }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [remember, setRemember] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -120,18 +119,6 @@ export default function Login({ onLogin }: Props) {
                 placeholder="••••••••"
                 autoComplete="current-password"
               />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                id="remember"
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-                className="rounded"
-                style={{ accentColor: '#009C60' }}
-              />
-              <label htmlFor="remember" className="text-sm text-gray-600">Lembrar-me neste dispositivo</label>
             </div>
 
             {error && (

@@ -134,7 +134,6 @@ Detalhes:
 | `GET /autenticacao/perfil`                | Perfil completo**+ unidades vinculadas** (`user_units`) + `unitsSyncedAt` + `username`                                  |
 | `PUT /autenticacao/perfil`                | Altera `name` **ou** troca a senha (`currentPassword`/`newPassword`) — **bloqueado** para usuários AD (`authSource: ad`) |
 | `POST /autenticacao/sincronizar-unidades` | Refaz as unidades do usuário:**admin → todas as unidades CREMEPE**; demais → `buscarUnidadesDoUsuario(username)`       |
-| `GET /autenticacao/sei-unidades`          | Lista unidades CREMEPE do SEI (cache)                                                                                   |
 
 ---
 
@@ -147,10 +146,10 @@ O banco usa `role` como string. Na prática, o código só trata **três papéis
 | Papel        | Origem                                | Comportamento                                                                                                                   |
 | ------------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `admin`      | seed / criado pelo admin              | Acesso total (ver, sincronizar e excluir finalizados; administração)                                                            |
-| `analista`   | seed / atribuído pelo admin           | Vê todos os processos; processos**Restritos** fora de suas unidades aparecem **mascarados** (`acessoRestrito: true`, sem dados) |
+| `analista`   | seed / atribuído pelo admin           | **Visibilidade total igual à do admin** (lista, detalhes e processos Restritos **sem máscara**); as ações exclusivas de admin continuam negadas (exclusão, painel, sincronizar finalizado) |
 | `assistente` | criado automaticamente no 1º login AD | Vê**apenas** processos de suas unidades vinculadas                                                                              |
 
-> O schema comenta `protocolo` e `gestor`, mas eles **não têm regras próprias** — caem no "demais papéis" e são tratados como visibilidade ampla (sem bloqueio por unidade). O rótulo no menu (`roleLabels`) só conhece admin/assistente/analista.
+> Os papéis efetivos são **admin, analista e assistente** — `protocolo`/`gestor` não existem (comentário do schema removido; nenhum usuário os usa). O rótulo no menu (`roleLabels`) conhece admin/assistente/analista.
 
 ### 4.2 Unidades do usuário
 
@@ -162,9 +161,9 @@ O banco usa `role` como string. Na prática, o código só trata **três papéis
 
 | Ação                                              | admin | assistente                                                                                 | analista                                                               |
 | ------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| Listar (`GET /processos`)                         | tudo  | intersecta com suas unidades (sem unidades → lista vazia)                                  | tudo, com**mascaramento** de Restritos fora das unidades               |
-| Ver detalhe, anotar, resumir, editar, sincronizar | ok    | 403 se processo fora de suas unidades                                                      | Restrito fora das unidades → payload parcial`acessoRestrito` (não 403) |
-| Cadastrar/importar                                | ok    | precisa que**alguma unidade aberta** do processo esteja entre as suas (403 caso contrário) | idem assistente                                                        |
+| Listar (`GET /processos`)                         | tudo  | intersecta com suas unidades (sem unidades → lista vazia)                                  | tudo, **sem mascaramento** (igual admin) |
+| Ver detalhe, anotar, resumir, editar, sincronizar | ok    | 403 se processo fora de suas unidades                                                      | liberado em **qualquer processo** (sem restrição de unidade/nível; sincronizar finalizado → 403, só admin) |
+| Cadastrar processo | ok | precisa que **alguma unidade aberta** do processo esteja entre as suas (403 caso contrário) | idem assistente |
 | Sincronizar processo**finalizado**                | ok    | **403** ("Somente administradores...")                                                     | **403**                                                                |
 | Excluir processo                                  | ok    | 403                                                                                        | 403                                                                    |
 | Administração (`/api/administracao/*`)            | ok    | 403 (`adminOnly`)                                                                          | 403                                                                    |
@@ -194,13 +193,10 @@ O banco usa `role` como string. Na prática, o código só trata **três papéis
 7. Registra `SyncLog` (`tipo: "manual"`, mensagem de sucesso).
 8. Responde `201` com o processo.
 
-### 5.3 Importação em lote `POST /api/processos/importar` (backend pronto, **sem tela**)
+### 5.3 Importação em lote — `POST /api/processos/importar` (**removido**)
 
-- Recebe `{ numeros: [...] }`; valida; busca `listarUnidades` **uma única vez** (cache).
-- Processa em **lotes paralelos com concorrência = 5**; por número: checa duplicado (`skipped`), consulta SEI, permissão por unidade, andamentos (cascata se preciso), conclusão + herança, `create`.
-- Registra **um** `SyncLog` (`tipo: "batch"`) com contagem de sucessos/falhas.
-- Responde `{ results: [...], summary: { total, successes, errors } }`.
-- Hoje **nenhuma tela chama este endpoint** (`batchImport` existe no `api.ts` mas não é usado; ver [§21](#21-pontos-de-atenção-e-dívidas-técnicas)).
+- O endpoint de importação em lote (concorrência = 5) foi **removido por não ter interface** (código morto).
+- A tela `/novo-processo` continua cadastrando números sequencialmente via `POST /processos`; se precisar do lote no futuro, recuperar do histórico do git.
 
 ---
 
@@ -226,7 +222,6 @@ flowchart TD
 
 - **`statusSistema` nunca volta de `finalizado` para `em_andamento`** (a não ser que já não fosse finalizado): `finalizado` se concluído ou pai finalizado; senão `em_andamento` (ou mantém `finalizado`).
 - `unidadeSincronizacao` guarda as unidades que **efetivamente retornaram andamentos** — são a primeira opção da cascata na próxima sincronização.
-- Função `autoImportados` é **zero**: a auto-importação de relacionados foi removida (só são exibidos).
 
 ### 6.2 `POST /api/processos/:id/sincronizar` (individual)
 
@@ -239,7 +234,7 @@ flowchart TD
 
 - Recebe `{ ids: [...] }`; **concorrência = 5**.
 - Por processo: não encontrado → `error`; `finalizado` e não-admin → `skipped`; sem permissão → `skipped`; senão `syncProcesso`.
-- **Não grava SyncLog** por item; responde `{ results, total, autoImportados }`.
+- **Não grava SyncLog** por item; responde `{ results, total }`.
 
 ### 6.4 Tela `/sincronizacao` (SyncPage)
 
@@ -264,7 +259,6 @@ Serviço em `backend/src/services/sei.ts` — monta envelopes XML e envia `POST`
 | `listarAndamentos`              | Histórico de movimentações por unidade                                                                                                                            | Para cada unidade, envia tarefas 1..50 (cobertura de tipos de andamento)                                                                     |
 | `listarUnidades`                | Unidades acessíveis ao serviço                                                                                                                                    | **Cache em memória de 5 min**; filtra siglas que começam com `CREMEPE`                                                                       |
 | `listarUsuarios`                | Usuários de uma unidade                                                                                                                                           | Usado para descobrir as unidades de um usuário AD                                                                                            |
-| `consultarDocumento` / download | Metadados e arquivo do documento                                                                                                                                  | Funções prontas no serviço,**sem endpoint exposto**                                                                                          |
 
 ### Cascata de unidades (`montarUnidadesParaBusca`)
 
@@ -286,7 +280,7 @@ Prioridade (sem duplicatas):
 
 - `em_andamento` — padrão de processos ativos (**o banco também pode conter `em_analise`, legado**: o filtro `status=em_andamento` aceita os dois).
 - `finalizado` — concluído (critérios abaixo) ou herdado de pai finalizado.
-- O frontend normaliza `em_analise`/`em_andamento` → `em_andamento` (`mapStatus`). As opções _Pendente_ e _Sobrestado_ **não existem mais** no filtro de relatórios.
+- O frontend normaliza `em_analise`/`em_andamento` → `em_andamento` (`mapStatus`). Os status _Pendente_ e _Sobrestado_ foram **removidos por completo** (tipo, mapStatus, rótulos e cores); o backend rejeita status inválidos com **400**.
 
 ### 8.2 Critérios de conclusão (`isProcessoConcluido`)
 
@@ -392,7 +386,7 @@ O detalhe do processo traz limite inicial de anotações visíveis com "Mostrar 
 | `dateFrom`, `dateTo`  | Filtro sobre`dataAutuacao` (formato `DD/MM/AAAA` convertido para comparar com `YYYY-MM-DD`) |
 | `sort`, `dir`         | `numeroSei`, `especificacao`, `dataAutuacao`, `createdAt`                                   |
 
-Aplicação de permissão na listagem: assistente intersecta com suas unidades (sem unidades → `"__NO_ACCESS__"`); analista recebe os restritos **mascarados** (só id/número/nível/status/unidades + `acessoRestrito: true`).
+Aplicação de permissão na listagem: assistente intersecta com suas unidades (sem unidades → `"__NO_ACCESS__"`); **analista e admin recebem os mesmos objetos completos** — o mascaramento (`acessoRestrito`) foi **removido do sistema**.
 
 Rotas de listagem especiais no frontend:
 
@@ -475,7 +469,7 @@ Rotas de listagem especiais no frontend:
 - **CORS**: apenas `localhost/127.0.0.1` nas portas `5173` e `8443` (com credenciais).
 - **Uploads**: `multer` em `backend/uploads/`, máx. 50 MB/arquivo, 20 arquivos, lista branca de extensões; arquivos apagados após a geração (`finally`).
 - **Limites de resumo**: texto agregado ≤ 90.000 caracteres (413).
-- **Concorrência**: importar/sincronizar em lote = 5 simultâneos (protege o SEI e a API).
+- **Concorrência**: sincronização em lote = 5 simultâneos (protege o SEI e a API).
 - **Caches**: unidades CREMEPE (5 min) e unidades por usuário consultadas sob demanda.
 
 ---
@@ -516,7 +510,6 @@ Validação extra: regex `/^\/processo\/[a-f0-9-]+$/` é aceita como detalhe; de
 | GET    | `/estatisticas`         | Estatísticas pessoais (processos que tenho acesso, das minhas unidades, minhas anotações) |
 | GET    | `/atividades`           | Últimas 20 ações do usuário na auditoria (mesmo conteúdo do log) |
 | POST   | `/sincronizar-unidades` | Refaz minhas unidades (grava `unitsSyncedAt`) |
-| GET    | `/sei-unidades`         | Unidades CREMEPE do SEI   |
 
 ### `/api/processos`
 
@@ -525,7 +518,6 @@ Validação extra: regex `/^\/processo\/[a-f0-9-]+$/` é aceita como detalhe; de
 | GET        | `/`                          | Lista paginada com filtros                               |
 | GET        | `/parados`                   | Processos parados                                        |
 | POST       | `/`                          | Cadastra processo (consulta SEI)                         |
-| POST       | `/importar`                  | Importação em lote (conc. 5)                             |
 | POST       | `/sincronizar-lote`          | Sincronização em lote (conc. 5)                          |
 | GET        | `/:id`                       | Detalhes                                                 |
 | PUT        | `/:id`                       | Atualiza status e/ou`tagIds`                             |
@@ -574,16 +566,17 @@ Validação extra: regex `/^\/processo\/[a-f0-9-]+$/` é aceita como detalhe; de
 
 Itens conhecidos do estado atual (úteis para manutenção):
 
-1. **`POST /processos/importar` sem interface** — o backend de importação em lote existe, mas a tela `/novo-processo` cadastra **sequencialmente** via `POST /processos` (função `batchImport` do `api.ts` não é usada).
-2. **`generateSummaryFromDocs` → `/processos/:id/resumo-documentos`** — função existe no `api.ts` mas **não há rota equivalente no backend** (chamada morreria com 404; nenhum componente a usa).
+1. **`POST /processos/importar` removido** — o endpoint de importação em lote não tinha interface (código morto) e foi eliminado; a tela `/novo-processo` continua cadastrando sequencialmente via `POST /processos`. Recuperar do histórico do git se necessário.
+2. **`generateSummaryFromDocs` removido** — era código morto (chamava `/processos/:id/resumo-documentos`, rota inexistente no backend); a função foi eliminada junto com `batchImport`, `getSummary` e `listAndamentos` (exports sem uso no `api.ts`).
 3. **Configurações SEI (regra de sobreposição)** — agora funcionais: a UI lê/salva via `GET/PUT /configuracoes`, o serviço SEI usa a configuração **efetiva** (`seiConfig` = `.env` sobrescrito pelo banco quando o valor não é vazio, recarregada no startup e ao salvar) e o teste de conexão é real. **Valores vazios no banco mantêm os do `.env`** (para "limpar" uma chave, apague a linha); a chave de acesso só é **troca** (nunca sai em claro nem volta mascarada para o banco). Salvar tem efeito imediato, sem reiniciar o servidor.
-4. **Papéis `protocolo` e `gestor`** citados no schema não têm regras de acesso próprias.
+4. **Papéis `protocolo`/`gestor` removidos** — só existiam no comentário do schema (removido); nenhum usuário os utiliza.
 5. **Sem sincronização automática** — não há job cron; tudo é sob demanda (página de sincronização, botões individuais).
 6. **Sem OCR** — imagens entram no resumo como marcador textual.
 7. **Filtro por unidade** usa _contains_ em JSON (`"sigla":"X"`), sensível a grafias exatas.
-8. **Documentos do SEI** — há funções prontas (`consultarDocumento`, `obterLinkDocumento`, `extrairDocumentos`) ainda sem endpoint/uso na UI.
-9. **`docs` desatualizados removidos** — o antigo `fluxo-importacao-sincronizacao.md` foi substituído por este arquivo; a especificação original (`frontend/src/imports/ESPECIFICACAO.md`) é o documento de planejamento e diverge da stack real em alguns pontos (ver nota no topo desse arquivo).
+8. **Documentos do SEI — funções removidas** — `consultarDocumento`, `obterLinkDocumento` e `extrairDocumentos` eram código morto (sem endpoint/UI); foram eliminadas do `sei.ts`. Reintroduzir apenas com caso de uso real.
+9. **`docs` desatualizados removidos** — `fluxo-importacao-sincronizacao.md` (substituído por este arquivo) e `frontend/src/imports/ESPECIFICACAO.md` (especificação de planejamento antiga, que contradizia a implementação) foram **removidos**; histórico preservado no git.
 10. **Tema escuro pendente** — a preferência já é coletada e salva no Perfil (`localStorage` `cremepe_tema`), mas a aplicação do modo escuro **ainda não foi implementada** (próxima etapa).
+12. **Depreciação `package.json#prisma`** — a config de seed no `package.json` (usada por `pnpm prisma db seed`) será removida no Prisma 7; migrar para `prisma.config.ts` quando atualizar a versão.
 11. **`username` legado (backfill)** — na migration `user_username`, contas AD receberam `username` = sAMAccountName (campo anterior) e locais receberam o **prefixo do e-mail**; se algum não seguir a convenção, corrija no modal de usuários da administração (campo "Username") — ele também é usado na busca de unidades no SEI.
 
 > Mantenha este documento sincronizado ao alterar rotas, permissões ou fluxos principais.

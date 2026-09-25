@@ -15,8 +15,6 @@ interface Props {
 const statusConfig: Record<ProcessStatus, { label: string; color: string; bg: string }> = {
   em_andamento: { label: 'Em Andamento', color: '#1D4ED8', bg: '#DBEAFE' },
   finalizado: { label: 'Finalizado', color: '#065F46', bg: '#D1FAE5' },
-  pendente: { label: 'Pendente', color: '#92400E', bg: '#FEF3C7' },
-  sobrestado: { label: 'Sobrestado', color: '#374151', bg: '#F3F4F6' },
 };
 
 const anotacaoLimit = 5;
@@ -96,7 +94,6 @@ export default function ProcessDetails({ user }: Props) {
   const [statusError, setStatusError] = useState('');
   const [statusSaving, setStatusSaving] = useState(false);
   const [processosPai, setProcessosPai] = useState<ProcessoPai[]>([]);
-  const [paisLoading, setPaisLoading] = useState(false);
   const [showAllAnotacoes, setShowAllAnotacoes] = useState(false);
   const [showAndamentosDialog, setShowAndamentosDialog] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -115,8 +112,7 @@ export default function ProcessDetails({ user }: Props) {
     listTags().then((t) => setAvailTags(t)).catch(() => {});
     listProcessosPai(processId)
       .then(setProcessosPai)
-      .catch(() => {})
-      .finally(() => setPaisLoading(false));
+      .catch(() => {});
   }, [processId]);
 
   if (notFound || !process) {
@@ -129,8 +125,6 @@ export default function ProcessDetails({ user }: Props) {
       </div>
     );
   }
-
-  const acessoRestrito = Boolean(process.acessoRestrito);
 
   const cfg = statusConfig[process.status];
 
@@ -232,13 +226,9 @@ export default function ProcessDetails({ user }: Props) {
     if (!process) return;
     setSyncLoading(true);
     try {
-      const updated = await syncProcess(process.id) as any;
+      const updated = await syncProcess(process.id);
       setProcess(updated);
-      let msg = 'Processo sincronizado com o SEI.';
-      if (updated.autoImportados > 0) {
-        msg += ` ${updated.autoImportados} processo(s) relacionado(s) importado(s).`;
-      }
-      dialog.success(msg);
+      dialog.success('Processo sincronizado com o SEI.');
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao sincronizar com o SEI.');
     } finally {
@@ -593,15 +583,6 @@ export default function ProcessDetails({ user }: Props) {
       </div>
 
       {/* Header */}
-      {acessoRestrito && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2">
-          <svg className="w-4 h-4 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-          </svg>
-          <p className="text-amber-800 text-sm">Acesso restrito</p>
-        </div>
-      )}
-
       <div className="bg-white rounded-xl border border-gray-100 p-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex-1 min-w-0">
@@ -647,8 +628,7 @@ export default function ProcessDetails({ user }: Props) {
                 Abrir no SEI
               </a>
             )}
-            {!acessoRestrito && (
-              <>
+            <>
                 <button
                   onClick={handleExportPdf}
                   disabled={exportingPdf}
@@ -682,26 +662,12 @@ export default function ProcessDetails({ user }: Props) {
                   </button>
                 )}
               </>
-            )}
           </div>
         </div>
         {statusError && <p className="text-red-600 text-sm mt-2">{statusError}</p>}
       </div>
 
-      {acessoRestrito && (
-        <div className="bg-white rounded-xl border border-gray-100 p-6">
-          <p className="text-sm text-gray-600 mb-4">
-            Este processo é de acesso restrito e não está nas suas unidades de trabalho. Os dados detalhados são exibidos apenas para administradores ou usuários das unidades vinculadas ao processo.
-          </p>
-          <div>
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Unidades</p>
-            <UnidadesLista unidades={unidadesUnificadas} altura={alturaCincoUnidades(unidadesUnificadas)} />
-          </div>
-        </div>
-      )}
-
-      {!acessoRestrito && (
-        <>
+      <>
           {/* Corpo: informações principais + resumo lateral */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
             <div className="xl:col-span-2 space-y-6 xl:order-2">
@@ -1009,17 +975,7 @@ export default function ProcessDetails({ user }: Props) {
             </div>
           </div>
           </div>
-        </>
-      )}
-
-      {acessoRestrito && (
-        <div className="bg-white rounded-xl border border-gray-100 py-16 text-center text-gray-400">
-          <svg className="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-          </svg>
-          <p className="text-sm">Dados detalhados indisponíveis para este processo.</p>
-        </div>
-      )}
+      </>
 
       {/* Histórico de Andamentos Dialog */}
       {showAndamentosDialog && (

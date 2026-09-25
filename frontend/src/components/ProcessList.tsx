@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listProcesses, deleteProcess, listUnidades, type SeiUnidade } from '../api';
+import { listProcesses, listUnidades, type SeiUnidade } from '../api';
 import type { Process, ProcessStatus } from '../types';
 import { formatDataPtBR } from '../utils/date';
 import { useDialog } from './ui/Dialog';
@@ -14,8 +14,6 @@ interface Props {
 const statusConfig: Record<ProcessStatus, { label: string; color: string; bg: string }> = {
   em_andamento: { label: 'Em Andamento', color: '#1D4ED8', bg: '#DBEAFE' },
   finalizado: { label: 'Finalizado', color: '#065F46', bg: '#D1FAE5' },
-  pendente: { label: 'Pendente', color: '#92400E', bg: '#FEF3C7' },
-  sobrestado: { label: 'Sobrestado', color: '#374151', bg: '#F3F4F6' },
 };
 
 export default function ProcessList({ onlyWithoutResumo = false }: Props) {
@@ -104,17 +102,6 @@ export default function ProcessList({ onlyWithoutResumo = false }: Props) {
   const toggleSort = (key: string) => {
     if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
     else { setSortKey(key); setSortDir('asc'); }
-  };
-
-  const handleDelete = async (p: Process) => {
-    const ok = await dialog.confirm(`Excluir o processo ${p.numeroSei}? Esta ação não pode ser desfeita.`, { title: 'Excluir processo' });
-    if (!ok) return;
-    try {
-      await deleteProcess(p.id);
-      load();
-    } catch (e: any) {
-      dialog.error(e?.message || 'Erro ao excluir processo.');
-    }
   };
 
   const hasFilters = search || statusFilter !== 'all' || unitFilter.length > 0 || tipoFilter.length > 0 || nivelFilter !== 'all' || semAndamentos || semDocumentos || dateFrom || dateTo;
