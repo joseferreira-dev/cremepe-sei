@@ -6,6 +6,7 @@ import { env } from "../config/env.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { ldapBind } from "../services/ldap.js";
 import { buscarUnidadesDoUsuario, listarUnidades } from "../services/sei.js";
+import { registrarAuditoria } from "../utils/audit.js";
 import type { SignOptions } from "jsonwebtoken";
 
 const { sign } = jwt;
@@ -28,11 +29,13 @@ router.post("/login", async (req: Request, res: Response) => {
     if (user && user.authSource === "ad") {
       const ldapUser = await ldapBind(username, password);
       if (!ldapUser) {
+        await registrarAuditoria(req, "login", user.email, "falha: credenciais do Active Directory inválidas", { userId: user.id, userName: user.name });
         res.status(401).json({ error: "Credenciais inválidas." });
         return;
       }
 
       if (!user.active) {
+        await registrarAuditoria(req, "login", user.email, "falha: conta desativada", { userId: user.id, userName: user.name });
         res.status(403).json({ error: "Conta desativada. Contate o administrador." });
         return;
       }
@@ -50,6 +53,8 @@ router.post("/login", async (req: Request, res: Response) => {
         { expiresIn: env.JWT_EXPIRES_IN } as SignOptions
       );
 
+      await registrarAuditoria(req, "login", user.email, "autenticação via Active Directory", { userId: user.id, userName: ldapUser.displayName });
+
       res.json({
         token,
         user: {
@@ -66,11 +71,13 @@ router.post("/login", async (req: Request, res: Response) => {
     if (user && user.authSource === "local") {
       const validPassword = await bcrypt.compare(password, user.passwordHash);
       if (!validPassword) {
+        await registrarAuditoria(req, "login", user.email, "falha: senha inválida", { userId: user.id, userName: user.name });
         res.status(401).json({ error: "Credenciais inválidas." });
         return;
       }
 
       if (!user.active) {
+        await registrarAuditoria(req, "login", user.email, "falha: conta desativada", { userId: user.id, userName: user.name });
         res.status(403).json({ error: "Conta desativada. Contate o administrador." });
         return;
       }
@@ -80,6 +87,8 @@ router.post("/login", async (req: Request, res: Response) => {
         env.JWT_SECRET,
         { expiresIn: env.JWT_EXPIRES_IN } as SignOptions
       );
+
+      await registrarAuditoria(req, "login", user.email, "autenticação local", { userId: user.id, userName: user.name });
 
       res.json({
         token,
@@ -96,6 +105,10 @@ router.post("/login", async (req: Request, res: Response) => {
 
     const ldapUser = await ldapBind(username, password);
     if (!ldapUser) {
+      await registrarAuditoria(req, "login", `${username}@cremepe.org.br`, "falha: usuário desconhecido ou credenciais do Active Directory inválidas", {
+        userId: null,
+        userName: `${username}@cremepe.org.br`,
+      });
       res.status(401).json({ error: "Credenciais inválidas." });
       return;
     }
@@ -121,16 +134,21 @@ router.post("/login", async (req: Request, res: Response) => {
       console.warn("[AUTH] Failed to sync units on first login:", e);
     }
 
-    const token = sign(
-      { userId: newUser.id, email: newUser.email, role: newUser.role },
-      env.JWT_SECRET,
-      { expiresIn: env.JWT_EXPIRES_IN } as SignOptions
-    );
+      const token = sign(
+        { userId: newUser.id, email: newUser.email, role: newUser.role },
+        env.JWT_SECRET,
+        { expiresIn: env.JWT_EXPIRES_IN } as SignOptions
+      );
 
-    res.json({
-      token,
-      user: {
-        id: newUser.id,
+      await registrarAuditoria(req, "login", newUser.email, "primeiro acesso via Active Directory — conta criada automaticamente", {
+        userId: newUser.id,
+        userName: ldapUser.displayName,
+      });
+
+      res.json({
+        token,
+        user: {
+          id: newUser.id,
         name: newUser.name,
         email: newUser.email,
         role: newUser.role,
@@ -214,6 +232,10 @@ router.put("/perfil", authMiddleware, async (req: Request, res: Response) => {
       select: { id: true, name: true, email: true, role: true, authSource: true, active: true, createdAt: true },
     });
 
+    if (updated.name !== user.name) {
+      await registrarAuditoria(req, "atualizar perfil", user.email, `nome: "${user.name}" → "${updated.name}"`);
+    }
+
     res.json(updated);
   } catch (error) {
     console.error("[AUTH] Profile update error:", error);
@@ -247,11 +269,18 @@ router.post("/sincronizar-unidades", authMiddleware, async (req: Request, res: R
       });
     }
 
+    await registrarAuditoria(req, "sincronizar minhas unidades", user.email, `${unidades.length} unidade(s) via SEI`);
     res.json({ synced: unidades.length });
   } catch (error: any) {
     console.error("[AUTH] Sync units error:", error);
     res.status(500).json({ error: `Erro ao sincronizar unidades: ${error.message}` });
   }
+});
+
+/** Registra o encerramento da sessão na auditoria (o JWT segue válido até expirar). */
+router.post("/logout", authMiddleware, async (req: Request, res: Response) => {
+  await registrarAuditoria(req, "logout", req.user!.email, "sessão encerrada pelo usuário");
+  res.json({ message: "Sessão encerrada." });
 });
 
 router.get("/sei-unidades", authMiddleware, async (_req: Request, res: Response) => {

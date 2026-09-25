@@ -3,6 +3,7 @@ import cors from "cors";
 import { env } from "./config/env.js";
 import { prisma } from "./db/prisma.js";
 import { errorHandler } from "./utils/errors.js";
+import { carregarSeiConfig } from "./config/seiConfig.js";
 import authRoutes from "./routes/auth.js";
 import processRoutes from "./routes/processes.js";
 import tagRoutes from "./routes/tags.js";
@@ -34,6 +35,9 @@ app.use(errorHandler);
 async function main() {
   await prisma.$connect();
   console.log("[DB] SQLite conectado com sucesso.");
+
+  await carregarSeiConfig();
+  console.log("[SEI] Configuração efetiva carregada (.env + banco).");
 
   app.listen(env.PORT, env.HOST, () => {
     console.log(`[SERVER] CREMEPE SEI Backend rodando em http://${env.HOST}:${env.PORT}`);

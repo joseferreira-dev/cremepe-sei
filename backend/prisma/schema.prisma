@@ -110,6 +110,7 @@ model SyncLog {
   id        String    @id @default(uuid())
   processId String?   @map("process_id")
   numeroSei String?   @map("numero_sei")
+  userId    String?   @map("user_id")
   tipo      String    // manual, batch, auto
   status    String    // success, error
   mensagem  String
@@ -118,6 +119,18 @@ model SyncLog {
   process Process? @relation(fields: [processId], references: [id], onDelete: SetNull)
 
   @@map("sync_logs")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  userName  String   @map("user_name")
+  acao      String
+  alvo      String
+  detalhe   String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
 }
 
 model Configuration {

@@ -14,7 +14,7 @@ import StalledProcesses from './components/StalledProcesses';
 import Profile from './components/Profile';
 import { DialogProvider } from './components/ui/Dialog';
 import type { User } from './types';
-import { login as apiLogin, loadStoredUser, clearSession, fetchMe } from './api';
+import { login as apiLogin, loadStoredUser, clearSession, fetchMe, logout } from './api';
 
 function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User) => void; onLogout: () => void }) {
   const navigate = useNavigate();
@@ -80,6 +80,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    logout().catch(() => {});
     clearSession();
     setUser(null);
   };

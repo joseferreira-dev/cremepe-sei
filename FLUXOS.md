@@ -118,7 +118,7 @@ Detalhes:
 1. `login()` grava token e usuário; `App` renderiza `<Login>` enquanto `user === null`.
 2. Qualquer `request()` que receba **401** dispara `clearSession()` + evento `cremepe-unauthorized` → `App` volta para o login (token expirado = saída automática).
 3. Ao voltar a focar a aba (`visibilitychange`), `fetchMe()` (`GET /autenticacao/usuario-atual`) revalida e atualiza o usuário.
-4. **Logout** = `clearSession()` + `setUser(null)` (sem chamada ao servidor).
+4. **Logout** = `POST /autenticacao/logout` (registra na auditoria) + `clearSession()` + `setUser(null)` — o JWT só deixa de valer ao expirar (não há blacklist).
 
 ### 3.4 Demais rotas de autenticação
 
@@ -432,14 +432,16 @@ Rotas de listagem especiais no frontend:
 
 ## 16. Administração
 
-**Tela `/administracao`** — item de menu visível **somente para `admin`**; backend reforça com `authMiddleware + adminOnly` em todo `/api/administracao/*`.
+**Tela `/administracao`** — item de menu visível **somente para `admin`**; backend reforça com `authMiddleware + adminOnly` em todo `/api/administracao/*`. A tela tem 5 abas e um painel de KPIs (ativos/inativos/AD/locais).
 
-| Seção                   | Endpoints                                                                    | Ações                                                                                                                                                                                             |
-| ----------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Usuários**            | `GET/POST /administracao/usuarios`, `PUT/DELETE /administracao/usuarios/:id` | Criar (local: senha obrigatória, hash bcrypt 12; AD: sem senha), editar papel/ativo/senha, excluir (remove`user_units` em cascata). Nome/e-mail de usuários **AD são bloqueados**                 |
-| Unidades de um usuário  | `POST /administracao/usuarios/:id/sincronizar-unidades`                      | Refaz as unidades (admin → todas; demais → busca por sigla no SEI)                                                                                                                                |
-| **SEI (Configurações)** | `GET/PUT /administracao/configuracoes`                                       | Tabela`configurations` (chave/valor) — **atenção**: o formulário da UI hoje não chama a API e o serviço SEI lê **apenas variáveis de ambiente** ([§21](#21-pontos-de-atenção-e-dívidas-técnicas)) |
-| **Registros**           | `GET /administracao/registros`                                               | 100 últimos`SyncLog` (data, tipo manual/batch/auto, status, mensagem, processo)                                                                                                                   |
+| Seção | Endpoints | Ações |
+| ----- | --------- | ----- |
+| **Usuários** | `GET/POST /administracao/usuarios`, `PUT/DELETE /administracao/usuarios/:id` | Busca por nome/e-mail e filtros por perfil/status; criar (local: senha obrigatória **mín. 8 caracteres**, hash bcrypt 12; AD: sem senha), editar papel/ativo/senha, excluir (remove `user_units` em cascata). **Proteções de auto-bloqueio** (front + back): o admin não pode desativar/excluir a si mesmo nem remover o próprio papel `admin` (403). Nome/e-mail de usuários **AD são bloqueados** e a **senha de usuários AD não pode ser criada nem alterada** (403 — é controlada pelo Active Directory). Coluna **Unidades (n)** abre o `MultiSelectDialog` para atribuição manual |
+| Unidades de um usuário | `POST /administracao/usuarios/:id/sincronizar-unidades`, `POST /administracao/usuarios/:id/unidades` | Sincronizar via SEI (admin → todas; demais → busca por sigla) **ou** atribuir manualmente (substitui o conjunto atual; catálogo de `GET /sei/unidades`) |
+| **Configurações SEI** | `GET/PUT /administracao/configuracoes`, `POST /administracao/testar-conexao` | Carrega os valores salvos; **banco sobrescreve o `.env` quando não vazio** (`seiConfig` em memória, sem reiniciar); chave de acesso **mascarada** no GET (`********`) e nunca regravada; **"Testar Conexão" é real** — chama o SEI (`listarUnidades`) com os valores do formulário, mesmo ainda não salvos |
+| **Logs de Sincronização** | `GET /administracao/registros` | Filtros (tipo, status, busca por nº/mensagem, período), paginação, **export CSV**, detalhe em diálogo, coluna **Usuário responsável** (`SyncLog.userId`) e link para o processo |
+| **Auditoria** | `GET /administracao/auditoria` | **Todas as ações do sistema exceto as sincronizações de processo** (essas ficam nos logs), gravadas em `audit_logs`: **login** (sucesso/falha, local/AD, primeiro acesso) e **logout**, cadastro/importação/atualização/**exclusão de processos**, **geração/salvamento de resumos**, **anotações** (criar/editar/excluir), **exportações/downloads** (PDF panorama e relatórios CSV/PDF/XLSX), gestão de usuários e unidades, salvar configurações — com usuário, ação, alvo, detalhe; busca + paginação |
+| **Sistema** | `GET /administracao/sistema` (+ teste de conexão) | Saúde da API, versão do Node, tamanho do SQLite, contagens (usuários/processos/logs/auditoria) e **configuração SEI efetiva** (URL, sigla, unidade, chave definida e sua origem `.env`/configurações) |
 
 ---
 
@@ -456,7 +458,7 @@ Rotas de listagem especiais no frontend:
 ## 18. Segurança, erros e limites
 
 - **JWT** (segredo `JWT_EXPIRES_IN`, default 24h) verificado em `authMiddleware`; rotas de admin com `adminOnly` adicional.
-- **Senhas**: bcrypt custo 12; usuários AD guardam `passwordHash: ""` (autenticação só no LDAP).
+- **Senhas**: bcrypt custo 12; usuários AD guardam `passwordHash: ""` (autenticação só no LDAP). Política na administração: **mínimo de 8 caracteres** (criação e redefinição, validado no front e no back).
 - **401 global**: dispara a saída automática da sessão no frontend; **403** devolve `{ error }` com a mensagem de acesso.
 - **CORS**: apenas `localhost/127.0.0.1` nas portas `5173` e `8443` (com credenciais).
 - **Uploads**: `multer` em `backend/uploads/`, máx. 50 MB/arquivo, 20 arquivos, lista branca de extensões; arquivos apagados após a geração (`finally`).
@@ -495,6 +497,7 @@ Validação extra: regex `/^\/processo\/[a-f0-9-]+$/` é aceita como detalhe; de
 | Método | Rota                    | Descrição                 |
 | ------ | ----------------------- | ------------------------- |
 | POST   | `/login`                | Login (local ou AD) → JWT |
+| POST   | `/logout`               | Registra o encerramento da sessão (auditoria; o JWT segue válido até expirar) |
 | GET    | `/usuario-atual`        | Usuário do token          |
 | GET    | `/perfil`               | Perfil + unidades         |
 | PUT    | `/perfil`               | Atualiza nome (local)     |
@@ -521,6 +524,7 @@ Validação extra: regex `/^\/processo\/[a-f0-9-]+$/` é aceita como detalhe; de
 | GET        | `/:id/resumo`                | Resumo salvo                                             |
 | GET/POST   | `/:id/anotacoes`             | Lista / cria anotação                                    |
 | PUT/DELETE | `/:id/anotacoes/:anotacaoId` | Editar (autor) / excluir (autor ou admin)                |
+| POST       | `/exportacoes`               | Registra download/exportação na auditoria (panorama ou relatório) |
 
 ### `/api/etiquetas`
 
@@ -531,13 +535,17 @@ Validação extra: regex `/^\/processo\/[a-f0-9-]+$/` é aceita como detalhe; de
 
 ### `/api/administracao` (somente admin)
 
-| Método     | Rota                                 | Descrição                         |
-| ---------- | ------------------------------------ | --------------------------------- |
-| GET/POST   | `/usuarios`                          | Lista / cria usuário              |
-| PUT/DELETE | `/usuarios/:id`                      | Atualiza / exclui usuário         |
-| POST       | `/usuarios/:id/sincronizar-unidades` | Refaz unidades de um usuário      |
-| GET        | `/registros`                         | 100 últimos logs de sincronização |
-| GET/PUT    | `/configuracoes`                     | Configurações chave/valor         |
+| Método     | Rota                                 | Descrição                                      |
+| ---------- | ------------------------------------ | ---------------------------------------------- |
+| GET/POST   | `/usuarios`                          | Lista (com unidades vinculadas) / cria usuário |
+| PUT/DELETE | `/usuarios/:id`                      | Atualiza / exclui (com guards de auto-bloqueio) |
+| POST       | `/usuarios/:id/sincronizar-unidades` | Refaz unidades de um usuário via SEI           |
+| POST       | `/usuarios/:id/unidades`             | Atribui unidades manualmente                   |
+| GET        | `/registros`                         | Logs de sincronização (filtros + paginação + responsável) |
+| GET        | `/auditoria`                         | Ações de administração                         |
+| GET/PUT    | `/configuracoes`                     | Configurações SEI (chave mascarada)            |
+| POST       | `/testar-conexao`                    | Teste real no SEI (aceita overrides do formulário) |
+| GET        | `/sistema`                           | Visão operacional (saúde, contagens, config efetiva) |
 
 ### `/api/sei` e utilitários
 
@@ -554,7 +562,7 @@ Itens conhecidos do estado atual (úteis para manutenção):
 
 1. **`POST /processos/importar` sem interface** — o backend de importação em lote existe, mas a tela `/novo-processo` cadastra **sequencialmente** via `POST /processos` (função `batchImport` do `api.ts` não é usada).
 2. **`generateSummaryFromDocs` → `/processos/:id/resumo-documentos`** — função existe no `api.ts` mas **não há rota equivalente no backend** (chamada morreria com 404; nenhum componente a usa).
-3. **Configurações SEI da Administração** — `GET/PUT /administracao/configuracoes` existem, mas a UI não os chama (botão "Salvar Configurações" sem `onClick`) e **"Testar Conexão" é simulado** (sem chamada real). O serviço SEI usa **apenas** variáveis de ambiente (`SEI_URL`, `SEI_SIGLA_SISTEMA`, `SEI_IDENTIFICACAO_SERVICO`, `SEI_ID_UNIDADE`).
+3. **Configurações SEI (regra de sobreposição)** — agora funcionais: a UI lê/salva via `GET/PUT /configuracoes`, o serviço SEI usa a configuração **efetiva** (`seiConfig` = `.env` sobrescrito pelo banco quando o valor não é vazio, recarregada no startup e ao salvar) e o teste de conexão é real. **Valores vazios no banco mantêm os do `.env`** (para "limpar" uma chave, apague a linha); a chave de acesso só é **troca** (nunca sai em claro nem volta mascarada para o banco). Salvar tem efeito imediato, sem reiniciar o servidor.
 4. **Papéis `protocolo` e `gestor`** citados no schema não têm regras de acesso próprias.
 5. **Sem sincronização automática** — não há job cron; tudo é sob demanda (página de sincronização, botões individuais).
 6. **Sem OCR** — imagens entram no resumo como marcador textual.

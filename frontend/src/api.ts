@@ -1,4 +1,4 @@
-import type { Process, User, UserUnit, Tag, Annotation, SyncLog } from './types';
+import type { Process, User, UserUnit, Tag, Annotation, SyncLog, AuditoriaLog, Paginacao, SistemaInfo } from './types';
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string) || 'http://127.0.0.1:8000/api';
 
@@ -94,6 +94,10 @@ export async function login(
 
 export async function fetchMe(): Promise<User> {
   return request<User>('/autenticacao/usuario-atual');
+}
+
+export async function logout(): Promise<{ message: string }> {
+  return request<{ message: string }>('/autenticacao/logout', { method: 'POST' });
 }
 
 export async function fetchProfile(): Promise<User & { units: UserUnit[] }> {
@@ -337,6 +341,19 @@ export async function getSummary(
   return request(`/processos/${id}/resumo`);
 }
 
+/** Registra na auditoria um download/exportação (panorama de processo ou relatório). */
+export async function registrarExportacao(payload: {
+  escopo: 'processo' | 'relatorio';
+  processoId?: string;
+  detalhe?: string;
+}): Promise<{ ok: boolean }> {
+  return request('/processos/exportacoes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
 // ---- Annotations ----
 export async function listAnnotations(processId: string): Promise<Annotation[]> {
   return request(`/processos/${processId}/anotacoes`);
@@ -455,8 +472,77 @@ export async function syncUserUnits(id: string): Promise<{ synced: number }> {
   return request<{ synced: number }>(`/administracao/usuarios/${id}/sincronizar-unidades`, { method: 'POST' });
 }
 
-export async function listLogs(): Promise<SyncLog[]> {
-  return request<SyncLog[]>('/administracao/registros');
+export async function setUserUnits(
+  id: string,
+  unidades: { unitId: string; unitSigla: string; unitDesc: string }[]
+): Promise<{ synced: number }> {
+  return request<{ synced: number }>(`/administracao/usuarios/${id}/unidades`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ unidades }),
+  });
+}
+
+export async function listLogs(params: {
+  tipo?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+  dateFrom?: string;
+  dateTo?: string;
+} = {}): Promise<{ logs: SyncLog[]; pagination: Paginacao }> {
+  const qs = new URLSearchParams();
+  if (params.tipo && params.tipo !== 'all') qs.set('tipo', params.tipo);
+  if (params.status && params.status !== 'all') qs.set('status', params.status);
+  if (params.search) qs.set('search', params.search);
+  if (params.page) qs.set('page', String(params.page));
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.dateFrom) qs.set('dateFrom', params.dateFrom);
+  if (params.dateTo) qs.set('dateTo', params.dateTo);
+  return request(`/administracao/registros?${qs.toString()}`);
+}
+
+export async function listAuditoria(params: { search?: string; page?: number; limit?: number } = {}): Promise<{
+  logs: AuditoriaLog[];
+  pagination: Paginacao;
+}> {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set('search', params.search);
+  if (params.page) qs.set('page', String(params.page));
+  if (params.limit) qs.set('limit', String(params.limit));
+  return request(`/administracao/auditoria?${qs.toString()}`);
+}
+
+// ---- Admin: configurações SEI ----
+export async function getSeiConfig(): Promise<Record<string, string>> {
+  return request<Record<string, string>>('/administracao/configuracoes');
+}
+
+export async function saveSeiConfig(configs: Record<string, string>): Promise<{ message: string }> {
+  return request('/administracao/configuracoes', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(configs),
+  });
+}
+
+export async function testSeiConnection(cfg?: {
+  url?: string;
+  siglaSistema?: string;
+  identificacaoServico?: string;
+  idUnidade?: string;
+}): Promise<{ ok: boolean; unidades: number }> {
+  return request('/administracao/testar-conexao', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg ?? {}),
+  });
+}
+
+// ---- Admin: sistema ----
+export async function getSistema(): Promise<SistemaInfo> {
+  return request<SistemaInfo>('/administracao/sistema');
 }
 
 // ---- SEI ----

@@ -25,5 +25,6 @@ backend/dist/
 backend/.env
 backend/uploads/
 backend/prisma/dev.db
+backend/prisma/baseline.db
 backend/server.log
 backend/server.log.err

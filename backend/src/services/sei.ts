@@ -1,4 +1,4 @@
-import { env } from "../config/env.js";
+import { seiConfig, type SeiConfigEfetiva } from "../config/seiConfig.js";
 
 /**
  * Interface de saída do consultarProcedimento.
@@ -72,8 +72,8 @@ function buildSoapEnvelope(numeroProcesso: string, idUnidade: string): string {
   <soapenv:Header/>
   <soapenv:Body>
     <sei:consultarProcedimento soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-      <SiglaSistema>${env.SEI_SIGLA_SISTEMA}</SiglaSistema>
-      <IdentificacaoServico>${env.SEI_IDENTIFICACAO_SERVICO}</IdentificacaoServico>
+      <SiglaSistema>${seiConfig.siglaSistema}</SiglaSistema>
+      <IdentificacaoServico>${seiConfig.identificacaoServico}</IdentificacaoServico>
       <IdUnidade>${idUnidade}</IdUnidade>
       <ProtocoloProcedimento>${numeroProcesso}</ProtocoloProcedimento>
       <SinRetornarAssuntos xsi:type="xsd:string">S</SinRetornarAssuntos>
@@ -91,17 +91,19 @@ function buildSoapEnvelope(numeroProcesso: string, idUnidade: string): string {
 }
 
 /** Envelope SOAP simples para listarUnidades (apenas credenciais). */
-function buildListarUnidadesEnvelope(): string {
+function buildListarUnidadesEnvelope(
+  cfg: { siglaSistema: string; identificacaoServico: string } = seiConfig
+): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                  xmlns:sei="Sei">
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:sei="Sei">
   <soapenv:Header/>
   <soapenv:Body>
     <sei:listarUnidades soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-      <SiglaSistema>${env.SEI_SIGLA_SISTEMA}</SiglaSistema>
-      <IdentificacaoServico>${env.SEI_IDENTIFICACAO_SERVICO}</IdentificacaoServico>
+      <SiglaSistema>${cfg.siglaSistema}</SiglaSistema>
+      <IdentificacaoServico>${cfg.identificacaoServico}</IdentificacaoServico>
     </sei:listarUnidades>
   </soapenv:Body>
 </soapenv:Envelope>`;
@@ -116,8 +118,8 @@ function buildConsultarDocumentoEnvelope(protocoloDocumento: string, idUnidade: 
   <soapenv:Header/>
   <soapenv:Body>
     <sei:consultarDocumento soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-      <SiglaSistema>${env.SEI_SIGLA_SISTEMA}</SiglaSistema>
-      <IdentificacaoServico>${env.SEI_IDENTIFICACAO_SERVICO}</IdentificacaoServico>
+      <SiglaSistema>${seiConfig.siglaSistema}</SiglaSistema>
+      <IdentificacaoServico>${seiConfig.identificacaoServico}</IdentificacaoServico>
       <IdUnidade>${idUnidade}</IdUnidade>
       <ProtocoloDocumento>${protocoloDocumento}</ProtocoloDocumento>
       <SinRetornarAssinaturas xsi:type="xsd:string">N</SinRetornarAssinaturas>
@@ -129,8 +131,8 @@ function buildConsultarDocumentoEnvelope(protocoloDocumento: string, idUnidade: 
 }
 
 /** Executa uma chamada SOAP ao SEI e devolve o XML da resposta. */
-async function fetchSoap(soapBody: string, soapAction: string): Promise<string> {
-  const response = await fetch(env.SEI_URL, {
+async function fetchSoap(soapBody: string, soapAction: string, url: string = seiConfig.url): Promise<string> {
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "text/xml; charset=utf-8",
@@ -263,6 +265,31 @@ export async function listarUnidades(force = false): Promise<Unidade[]> {
   return unidadesCache;
 }
 
+/**
+ * Testa a conectividade com o WebService do SEI (listarUnidades).
+ * Permite sobrescrever temporariamente os valores de configuração
+ * (ex.: formulário da administração ainda não salvo).
+ */
+export async function testarConexao(
+  cfg?: Partial<SeiConfigEfetiva>
+): Promise<{ ok: boolean; unidades?: number; erro?: string }> {
+  const eff: SeiConfigEfetiva = { ...seiConfig, ...cfg };
+  try {
+    const xml = await fetchSoap(buildListarUnidadesEnvelope(eff), "Sei#listarUnidades", eff.url);
+    if (xml.includes("<faultstring>")) {
+      const m = xml.match(/<faultstring>([\s\S]*?)<\/faultstring>/);
+      return { ok: false, erro: m ? m[1].trim() : "Erro SOAP desconhecido ao contatar o SEI." };
+    }
+    const unidades = parseUnidades(xml);
+    if (unidades.length === 0) {
+      return { ok: false, erro: "O SEI respondeu sem nenhuma unidade — verifique a chave de acesso." };
+    }
+    return { ok: true, unidades: unidades.length };
+  } catch (e: any) {
+    return { ok: false, erro: e?.message || "Falha de conexão com o SEI." };
+  }
+}
+
 export interface UsuarioSei {
   IdUsuario: string;
   Sigla: string;
@@ -278,8 +305,8 @@ function buildListarUsuariosEnvelope(idUnidade: string): string {
   <soapenv:Header/>
   <soapenv:Body>
     <sei:listarUsuarios soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-      <SiglaSistema>${env.SEI_SIGLA_SISTEMA}</SiglaSistema>
-      <IdentificacaoServico>${env.SEI_IDENTIFICACAO_SERVICO}</IdentificacaoServico>
+      <SiglaSistema>${seiConfig.siglaSistema}</SiglaSistema>
+      <IdentificacaoServico>${seiConfig.identificacaoServico}</IdentificacaoServico>
       <IdUnidade>${idUnidade}</IdUnidade>
     </sei:listarUsuarios>
   </soapenv:Body>
@@ -625,8 +652,8 @@ export async function consultarProcedimento(
   // busca em todas as unidades CREMEPE retornadas por listarUnidades.
   // Se SEI_ID_UNIDADE estiver preenchido, restringe a essa unidade.
   let unidades: Unidade[];
-  if (env.SEI_ID_UNIDADE) {
-    unidades = [{ IdUnidade: env.SEI_ID_UNIDADE, Sigla: env.SEI_ID_UNIDADE, Descricao: "" }];
+  if (seiConfig.idUnidade) {
+    unidades = [{ IdUnidade: seiConfig.idUnidade, Sigla: seiConfig.idUnidade, Descricao: "" }];
   } else {
     try {
       unidades = await listarUnidades();
@@ -700,8 +727,8 @@ function buildListarAndamentosEnvelope(
   <soapenv:Header/>
   <soapenv:Body>
     <sei:listarAndamentos soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-      <SiglaSistema>${env.SEI_SIGLA_SISTEMA}</SiglaSistema>
-      <IdentificacaoServico>${env.SEI_IDENTIFICACAO_SERVICO}</IdentificacaoServico>
+      <SiglaSistema>${seiConfig.siglaSistema}</SiglaSistema>
+      <IdentificacaoServico>${seiConfig.identificacaoServico}</IdentificacaoServico>
       <IdUnidade>${idUnidade}</IdUnidade>
       <ProtocoloProcedimento>${protocoloProcedimento}</ProtocoloProcedimento>
       <Tarefas xsi:type="sei:ArrayOfTarefas">
@@ -970,8 +997,8 @@ export async function obterLinkDocumento(
   protocoloDocumento: string
 ): Promise<string | null> {
   let unidades: Unidade[];
-  if (env.SEI_ID_UNIDADE) {
-    unidades = [{ IdUnidade: env.SEI_ID_UNIDADE, Sigla: env.SEI_ID_UNIDADE, Descricao: "" }];
+  if (seiConfig.idUnidade) {
+    unidades = [{ IdUnidade: seiConfig.idUnidade, Sigla: seiConfig.idUnidade, Descricao: "" }];
   } else {
     try {
       unidades = await listarUnidades();
@@ -997,7 +1024,7 @@ export async function obterLinkDocumento(
 export async function consultarDocumentoFromLink(
   linkAcesso: string
 ): Promise<ArrayBuffer> {
-  const url = linkAcesso.startsWith("http") ? linkAcesso : `${env.SEI_URL.replace(/\/ws\/.*$/, "")}${linkAcesso}`;
+  const url = linkAcesso.startsWith("http") ? linkAcesso : `${seiConfig.url.replace(/\/ws\/.*$/, "")}${linkAcesso}`;
   const response = await fetch(url, {
     signal: AbortSignal.timeout(30000),
   });

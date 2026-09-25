@@ -65,8 +65,47 @@ export interface SyncLog {
   id: string;
   processId?: string;
   numeroSei?: string;
+  userId?: string | null;
+  userName?: string | null;
   tipo: 'manual' | 'batch' | 'auto';
   status: 'success' | 'error';
   mensagem: string;
   executedAt: string;
+}
+
+export interface AuditoriaLog {
+  id: string;
+  userId: string;
+  userName: string;
+  acao: string;
+  alvo: string;
+  detalhe: string;
+  createdAt: string;
+}
+
+export interface Paginacao {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface SistemaInfo {
+  saude: string;
+  node: string;
+  banco: { caminho: string; tamanhoBytes: number | null };
+  contagens: {
+    usuarios: number;
+    usuariosAtivos: number;
+    processos: number;
+    syncLogs: number;
+    auditLogs: number;
+  };
+  seiConfig: {
+    url: string;
+    siglaSistema: string;
+    idUnidade: string;
+    chaveDefinida: boolean;
+    chaveOrigem: string;
+  };
 }

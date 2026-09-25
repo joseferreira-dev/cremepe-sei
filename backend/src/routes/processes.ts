@@ -7,6 +7,7 @@ import { authMiddleware } from "../middleware/auth.js";
 import { consultarProcedimento, listarAndamentos, listarUnidades, isProcessoConcluido, montarUnidadesParaBusca } from "../services/sei.js";
 import { gerarResumo } from "../services/gemini.js";
 import { extrairTexto } from "../services/fileExtractor.js";
+import { registrarAuditoria } from "../utils/audit.js";
 
 const UPLOAD_DIR = join(process.cwd(), "uploads");
 
@@ -776,11 +777,14 @@ router.post("/", async (req: Request, res: Response) => {
       data: {
         processId: processo.id,
         numeroSei,
+        userId: req.user!.userId,
         tipo: "manual",
         status: "success",
         mensagem: "Processo cadastrado com sucesso via SEI.",
       },
     });
+
+    await registrarAuditoria(req, "cadastrar processo", numeroSei, "cadastro manual via consulta ao SEI");
 
     res.status(201).json({ ...processo, autoImportados: 0 });
   } catch (error) {
@@ -948,10 +952,13 @@ router.post("/importar", async (req: Request, res: Response) => {
     await prisma.syncLog.create({
       data: {
         tipo: "batch",
+        userId: req.user!.userId,
         status: errors === 0 ? "success" : "error",
         mensagem: `Importação em lote: ${numeros.length} processos processados, ${successes} importados, ${errors} falhas.`,
       },
     });
+
+    await registrarAuditoria(req, "importar processos", `${successes}/${numeros.length} processos`, `${errors} falha(s) na importação em lote`);
 
     res.json({ results, summary: { total: numeros.length, successes, errors, autoImportados, autoImportNumeros } });
   } catch (error) {
@@ -1009,6 +1016,43 @@ router.post("/sincronizar-lote", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Registra exportações/downloads para a auditoria (PDF de panorama de um
+ * processo e arquivos de relatório). Não altera dados — apenas registra.
+ */
+router.post("/exportacoes", async (req: Request, res: Response) => {
+  try {
+    const { escopo, processoId, detalhe } = req.body || {};
+
+    if (escopo === "processo") {
+      if (!processoId || typeof processoId !== "string") {
+        res.status(400).json({ error: "processoId é obrigatório para escopo 'processo'." });
+        return;
+      }
+      const process = await prisma.process.findUnique({ where: { id: processoId } });
+      if (!process) {
+        res.status(404).json({ error: "Processo não encontrado." });
+        return;
+      }
+      const { acesso } = await permissaoDeAcesso(req.user!.userId, process);
+      if (!acesso.permitido) {
+        res.status(403).json({ error: acesso.motivo || "Acesso negado." });
+        return;
+      }
+      await registrarAuditoria(req, "exportar processo", process.numeroSei, detalhe || "PDF panorama geral");
+    } else if (escopo === "relatorio") {
+      await registrarAuditoria(req, "exportar relatório", String(detalhe || "relatório"));
+    } else {
+      res.status(400).json({ error: "escopo deve ser 'processo' ou 'relatorio'." });
+      return;
+    }
+
+    res.json({ ok: true });
+  } catch (error: any) {
+    res.status(500).json({ error: `Erro ao registrar exportação: ${error.message}` });
+  }
+});
+
 // Sync with SEI
 router.post("/:id/sincronizar", async (req: Request, res: Response) => {
   try {
@@ -1034,6 +1078,7 @@ router.post("/:id/sincronizar", async (req: Request, res: Response) => {
       data: {
         processId: process.id,
         numeroSei: process.numeroSei,
+        userId: req.user!.userId,
         tipo: "manual",
         status: result.status === "error" ? "error" : "success",
         mensagem: result.status === "error"
@@ -1089,7 +1134,11 @@ router.put("/:id", async (req: Request, res: Response) => {
     }
 
     const updateData: any = {};
-    if (statusSistema) updateData.statusSistema = statusSistema;
+    const mudancas: string[] = [];
+    if (statusSistema && statusSistema !== process.statusSistema) {
+      updateData.statusSistema = statusSistema;
+      mudancas.push(`status: ${process.statusSistema} → ${statusSistema}`);
+    }
 
     const updated = await prisma.process.update({
       where: { id: req.params.id },
@@ -1103,6 +1152,11 @@ router.put("/:id", async (req: Request, res: Response) => {
           data: tagIds.map((tagId: string) => ({ processId: process.id, tagId })),
         });
       }
+      mudancas.push(`tags: ${tagIds.length} definida(s)`);
+    }
+
+    if (mudancas.length > 0) {
+      await registrarAuditoria(req, "atualizar processo", process.numeroSei, mudancas.join(" · "));
     }
 
     const full = await prisma.process.findUnique({
@@ -1143,6 +1197,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
     }
 
     await prisma.process.delete({ where: { id: req.params.id } });
+    await registrarAuditoria(req, "excluir processo", process.numeroSei, `status anterior: ${process.statusSistema}`);
     res.json({ message: "Processo excluído com sucesso." });
   } catch (error) {
     console.error("[PROCESSES] Delete error:", error);
@@ -1178,6 +1233,8 @@ router.post("/:id/resumo/save", async (req: Request, res: Response) => {
         resumoGeradoEm: new Date(),
       },
     });
+
+    await registrarAuditoria(req, "salvar resumo", process.numeroSei, `${resumo.trim().length} caractere(s)`);
 
     res.json({ process: updated });
   } catch (error: any) {
@@ -1241,6 +1298,8 @@ router.post("/:id/resumo", upload.array("files", 20), async (req: Request, res: 
     }
 
     const resumo = await gerarResumo(textoCompleto);
+
+    await registrarAuditoria(req, "gerar resumo", process.numeroSei, `${files?.length ?? 0} arquivo(s)${textoManual ? " + texto manual" : ""}`);
 
     res.json({ resumo });
   } catch (error: any) {
@@ -1313,6 +1372,8 @@ router.post("/:id/anotacoes", async (req: Request, res: Response) => {
       },
     });
 
+    await registrarAuditoria(req, "criar anotação", process.numeroSei, content.trim().slice(0, 120));
+
     res.status(201).json(annotation);
   } catch (error) {
     console.error("[ANNOTATIONS] Create error:", error);
@@ -1375,6 +1436,12 @@ router.put("/:id/anotacoes/:anotacaoId", async (req: Request, res: Response) => 
       data: { content: content.trim() },
     });
 
+    const procEdicao = await prisma.process.findUnique({
+      where: { id: annotation.processId },
+      select: { numeroSei: true },
+    });
+    await registrarAuditoria(req, "editar anotação", procEdicao?.numeroSei || annotation.processId, content.trim().slice(0, 120));
+
     res.json(updated);
   } catch (error) {
     console.error("[ANNOTATIONS] Update error:", error);
@@ -1400,6 +1467,13 @@ router.delete("/:id/anotacoes/:anotacaoId", async (req: Request, res: Response) 
     }
 
     await prisma.annotation.delete({ where: { id: req.params.anotacaoId } });
+
+    const procExclusao = await prisma.process.findUnique({
+      where: { id: annotation.processId },
+      select: { numeroSei: true },
+    });
+    await registrarAuditoria(req, "excluir anotação", procExclusao?.numeroSei || annotation.processId, `anotação ${req.params.anotacaoId}`);
+
     res.json({ message: "Anotação excluída com sucesso." });
   } catch (error) {
     console.error("[ANNOTATIONS] Delete error:", error);

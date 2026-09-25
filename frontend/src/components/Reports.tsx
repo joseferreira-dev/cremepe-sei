@@ -1,7 +1,7 @@
 ﻿import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Process, ProcessStatus } from '../types';
-import { listProcesses, listUnidades, type SeiUnidade } from '../api';
+import { listProcesses, listUnidades, registrarExportacao, type SeiUnidade } from '../api';
 import { formatDataPtBR } from '../utils/date';
 import Spinner from './ui/Spinner';
 import MultiSelectDialog from './ui/MultiSelectDialog';
@@ -388,11 +388,16 @@ export default function Reports() {
     }
   };
 
+  const auditarExportacao = (detalhe: string) => {
+    registrarExportacao({ escopo: 'relatorio', detalhe }).catch(() => {});
+  };
+
   const exportProcessosCsv = () => {
     if (exportFields.length === 0) return;
     const header = exportFields.map((k) => EXPORT_FIELDS.find((f) => f.key === k)!.label);
     const rows = processes.map((p) => exportFields.map((k) => exportValue(p, k)));
     downloadCsv(`relatorio-processos-${new Date().toISOString().slice(0, 10)}.csv`, [header, ...rows]);
+    auditarExportacao('CSV da listagem de processos');
   };
 
   const exportProcessosPdf = async () => {
@@ -445,6 +450,7 @@ export default function Reports() {
         },
       });
       doc.save(`relatorio-listagem-${new Date().toISOString().slice(0, 10)}.pdf`);
+    auditarExportacao('PDF da listagem de processos');
     } finally {
       setExporting(false);
     }
@@ -587,6 +593,7 @@ export default function Reports() {
 
       addFooter();
       doc.save(`relatorio-resumo-${new Date().toISOString().slice(0, 10)}.pdf`);
+    auditarExportacao('PDF do resumo');
     } finally {
       setExporting(false);
     }
@@ -769,6 +776,7 @@ export default function Reports() {
       a.download = `relatorio-resumo-${new Date().toISOString().slice(0, 10)}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
+      auditarExportacao('XLSX do resumo');
     } finally {
       setExporting(false);
     }

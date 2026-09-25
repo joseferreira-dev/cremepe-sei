@@ -1,7 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { User, Process, ProcessStatus, Annotation, Tag } from '../types';
-import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, saveSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listProcessosPai, type ProcessoPai } from '../api';
+import { getProcess, listAnnotations, createAnnotation, updateAnnotation, deleteAnnotation, syncProcess, updateProcess, generateSummary, saveSummary, listTags, deleteProcess, findProcessByNumero, createProcess, listProcessosPai, registrarExportacao, type ProcessoPai } from '../api';
 import { formatDataPtBR } from '../utils/date';
 import { cleanSeiText } from '../utils/text';
 import { useDialog } from './ui/Dialog';
@@ -573,6 +573,7 @@ export default function ProcessDetails({ user }: Props) {
       }
 
       doc.save(`panorama-processo-${process.numeroSei}.pdf`);
+      registrarExportacao({ escopo: 'processo', processoId: process.id, detalhe: 'PDF panorama geral' }).catch(() => {});
     } catch (e: any) {
       dialog.error(e?.message || 'Erro ao gerar o PDF.');
     } finally {

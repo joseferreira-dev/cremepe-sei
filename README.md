@@ -110,6 +110,21 @@ O seed cria o usuário administrador padrão:
 
 > ⚠️ Altere a senha do administrador em produção.
 
+#### Banco de dados: baseline única
+
+- O esquema completo está em **uma única migration**: `backend/prisma/migrations/20260925000000_baseline/migration.sql` (as migrations antigas foram consolidadas em uma baseline).
+- `backend/prisma/baseline.db` é um **snapshot com todos os dados atuais** (esquema + registros). Para regenerar o banco do zero mantendo os dados, **pare o backend** e copie o snapshot sobre o banco:
+
+```bash
+# Windows
+copy backend\prisma\baseline.db backend\prisma\dev.db
+# Linux/macOS
+cp backend/prisma/baseline.db backend/prisma/dev.db
+```
+
+- Banco novo vazio: `pnpm prisma migrate dev` aplica a baseline.
+- Para criar um novo ponto de restauração: pare o backend e copie `dev.db` → `baseline.db`. O `baseline.db` está no `.gitignore` (contém dados reais).
+
 ### 3. Frontend
 
 ```bash
