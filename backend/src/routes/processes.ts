@@ -7,6 +7,7 @@ import { authMiddleware } from "../middleware/auth.js";
 import { consultarProcedimento, listarAndamentos, listarUnidades, isProcessoConcluido, montarUnidadesParaBusca } from "../services/sei.js";
 import { gerarResumo } from "../services/gemini.js";
 import { extrairTexto } from "../services/fileExtractor.js";
+import { sugerirEncaminhamento, sugerirPorTipo, aplicarRegraReembolso } from "../services/encaminhamento.js";
 import { registrarAuditoria } from "../utils/audit.js";
 
 const UPLOAD_DIR = join(process.cwd(), "uploads");
@@ -32,6 +33,75 @@ const upload = multer({
 const router = Router();
 
 router.use(authMiddleware);
+
+// Sugestão de encaminhamento: nova demanda (texto e/ou arquivos) → unidade destino,
+// a partir dos andamentos de processos semelhantes da base histórica.
+router.post("/sugestao-encaminhamento", upload.array("files", 20), async (req: Request, res: Response) => {
+  const files = (req.files as Express.Multer.File[]) || [];
+  const tempPaths: string[] = [];
+
+  try {
+    const descricao = (req.body.descricao || "").trim();
+    const tipo = (req.body.tipo || "").trim();
+
+    if (!descricao && files.length === 0) {
+      res.status(400).json({ error: "Descreva a demanda ou envie arquivos para analisar." });
+      return;
+    }
+
+    // Concatena apenas o conteúdo (sem rótulos) para não poluir a consulta com
+    // termos estruturais como "descrição" ou "arquivo".
+    const partes: string[] = [];
+    if (tipo) partes.push(tipo);
+    if (descricao) partes.push(descricao);
+
+    for (const file of files) {
+      tempPaths.push(file.path);
+      try {
+        const texto = await extrairTexto(file.path, file.originalname);
+        if (texto.trim()) partes.push(texto);
+      } catch (err: any) {
+        console.warn(`[ENCAMINHAMENTO] Falha ao extrair texto de ${file.originalname}: ${err.message}`);
+      }
+    }
+
+    const textoCompleto = partes.join("\n\n");
+
+    if (!textoCompleto.trim()) {
+      res.status(422).json({ error: "Nao foi possivel extrair texto dos arquivos enviados." });
+      return;
+    }
+
+    if (textoCompleto.length > 90000) {
+      res.status(413).json({ error: "Texto excessivo. Envie menos arquivos ou reduza a descricao da demanda." });
+      return;
+    }
+
+    let resultado = await sugerirEncaminhamento(textoCompleto);
+    if (resultado.estrategia === "nenhuma" && tipo) {
+      const porTipo = await sugerirPorTipo(tipo);
+      if (porTipo.estrategia === "tipo") resultado = porTipo;
+    }
+    resultado = await aplicarRegraReembolso(resultado, textoCompleto);
+
+    const top = resultado.sugestoes[0];
+    await registrarAuditoria(
+      req,
+      "sugerir encaminhamento",
+      "-",
+      `${files.length} arquivo(s)${descricao ? " + descricao" : ""} -> ${top ? `${top.sigla} (${Math.round(top.peso * 100)}%)` : "sem sugestao"}`
+    );
+
+    res.json(resultado);
+  } catch (error: any) {
+    console.error("[ENCAMINHAMENTO] Erro:", error);
+    res.status(500).json({ error: `Erro ao sugerir encaminhamento: ${error.message}` });
+  } finally {
+    for (const p of tempPaths) {
+      unlink(p, () => {});
+    }
+  }
+});
 
 interface SyncResult {
   status: "success" | "skipped" | "error";

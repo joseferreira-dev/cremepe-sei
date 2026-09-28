@@ -20,17 +20,21 @@ Sistema de Gestão Inteligente de Processos do **CREMEPE** (Conselho Regional de
 │
 ├── backend/             # API REST (Express + Prisma + SQLite)
 │   ├── src/             # Código-fonte (rotas, serviços, middleware)
+│   ├── scripts/         # Scripts utilitários (ex.: gerador do dicionário)
 │   ├── prisma/          # Schema do banco e seed
 │   └── package.json     # Dependências e scripts do backend
 │
 ├── .env                 # Credenciais SEI + LLM (raiz)
-├── FLUXOS.md            # Documentação detalhada de todos os fluxos do sistema
+├── dicionario-tramites.xlsx  # Dicionário de trâmites iniciais (gerado)
+├── DOCS.md              # Documentação geral do sistema
+├── ENCAMINHAMENTO.md    # Documentação da sugestão de encaminhamento
 └── README.md
 ```
 
 ## Documentação
 
-- **[`FLUXOS.md`](./FLUXOS.md)** — todos os fluxos do sistema em detalhe: autenticação (local/AD), permissões, cadastro e importação, sincronização com o SEI, resumo com IA, anotações, tags, dashboard, relatórios, administração, mapa de rotas e tabela completa de endpoints.
+- **[`DOCS.md`](./DOCS.md)** — documentação geral do sistema: autenticação (local/AD), permissões e matriz por tela, cadastro e importação, sincronização com o SEI, resumo com IA, anotações, tags, dashboard, relatórios, administração, sugestão de encaminhamento, mapa de rotas, tabela completa de endpoints e dívidas técnicas.
+- **[`ENCAMINHAMENTO.md`](./ENCAMINHAMENTO.md)** — em detalhe como funciona a sugestão de unidade de encaminhamento (k-NN sobre a base histórica, regra de domínio de reembolso → SECON), o dicionário de trâmites (`npm run gerar:dicionario`), avaliação, limitações e como testar.
 
 > A API usa **endpoints em português** (`/api/autenticacao`, `/api/processos`, `/api/etiquetas`, `/api/administracao`, `/api/sei`) e as rotas do frontend também (`/processos`, `/relatorios`, `/sincronizacao`...). Após mudanças de rota, reinicie backend e frontend.
 
@@ -153,6 +157,7 @@ pnpm preview      # serve o build (porta 8443 por padrão)
 | `pnpm start`              | Executa o build compilado                 |
 | `pnpm prisma migrate dev` | Aplica migrações do banco                 |
 | `pnpm prisma db seed`     | Popula o banco com dados iniciais         |
+| `pnpm gerar:dicionario`   | Gera `dicionario-tramites.xlsx` na raiz   |
 
 ### Frontend (`frontend/`)
 
@@ -172,7 +177,7 @@ pnpm preview      # serve o build (porta 8443 por padrão)
 ## Funcionalidades
 
 - **Autenticação JWT** em dois modos: **local** (bcrypt) e **Active Directory** (LDAP); o primeiro login AD cria o usuário e sincroniza suas unidades SEI
-- **Perfis com controle de acesso**: admin (tudo), analista (vê tudo, com mascaramento de processos Restritos fora de suas unidades) e assistente (apenas suas unidades)
+- **Perfis com controle de acesso**: admin (tudo), analista (vê tudo) e assistente (apenas suas unidades)
 - **Cadastro de processos** via WebService SOAP do SEI (`consultarProcedimento`), com importação de vários números colados de uma vez
 - **Sincronização** individual e em lote (concorrência de 5), com cascata de unidades, detecção de conclusão e herança de status de processos pai
 - **Resumos executivos gerados por IA** (Google Gemini, com fallback de modelos) a partir de documentos (PDF, DOCX, ODT, planilhas, texto manual)
@@ -180,6 +185,8 @@ pnpm preview      # serve o build (porta 8443 por padrão)
 - **Processos parados**: em andamento sem movimentação recente (exclui filhos anexados)
 - **Dashboard** com período configurável (padrão: últimos 6 meses), KPIs e gráficos (evolução, últimos processos, unidades, top tipos)
 - **Relatórios** com filtros, gráficos e exportação em **CSV, PDF e XLSX**
+- **Sugestão de encaminhamento**: descreva uma nova demanda (texto e/ou arquivos) e receba as unidades candidatas com pesos — k-NN com TF-IDF sobre os andamentos da base histórica + regra de domínio (devolução/reembolso → SECON)
+- **Dicionário de trâmites** (`pnpm gerar:dicionario` → `dicionario-tramites.xlsx`): unidades iniciais por situação, por setor e trâmites iniciais observados, para conferência com os setores
 - **Administração** (apenas admin): usuários, unidades por usuário e registros de sincronização
 
 ## Notas

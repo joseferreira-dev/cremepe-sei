@@ -1,6 +1,11 @@
-# Fluxos do Sistema CREMEPE SEI
+# DOCS.md — Documentação do Sistema CREMEPE SEI
 
-Este documento descreve **detalhadamente todos os fluxos** do sistema em seu estado atual (conforme código-fonte). Ele substitui o antigo `fluxo-importacao-sincronizacao.md`, que cobria apenas importação e sincronização.
+Documentação **geral e detalhada** do sistema em seu estado atual (conforme código-fonte).
+Este arquivo unifica e substitui os antigos `FLUXOS.md` (fluxos) e `PAPEIS_E_PERMISSOES.md`
+(papéis e permissões), cujo conteúdo foi absorvido aqui.
+
+> A lógica de **sugestão de encaminhamento** tem documentação própria e detalhada em
+> [`ENCAMINHAMENTO.md`](./ENCAMINHAMENTO.md).
 
 ## Sumário
 
@@ -19,12 +24,13 @@ Este documento descreve **detalhadamente todos os fluxos** do sistema em seu est
 13. [Listagem, busca e filtros de processos](#13-listagem-busca-e-filtros-de-processos)
 14. [Dashboard](#14-dashboard)
 15. [Relatórios e exportações](#15-relatórios-e-exportações)
-16. [Administração](#16-administração)
-17. [Perfil e unidades do usuário](#17-perfil-e-unidades-do-usuário)
-18. [Segurança, erros e limites](#18-segurança-erros-e-limites)
-19. [Mapa de rotas do frontend](#19-mapa-de-rotas-do-frontend)
-20. [Tabela completa de endpoints](#20-tabela-completa-de-endpoints)
-21. [Pontos de atenção e dívidas técnicas](#21-pontos-de-atenção-e-dívidas-técnicas)
+16. [Sugestão de encaminhamento](#16-sugestão-de-encaminhamento)
+17. [Administração](#17-administração)
+18. [Perfil e unidades do usuário](#18-perfil-e-unidades-do-usuário)
+19. [Segurança, erros e limites](#19-segurança-erros-e-limites)
+20. [Mapa de rotas do frontend](#20-mapa-de-rotas-do-frontend)
+21. [Tabela completa de endpoints](#21-tabela-completa-de-endpoints)
+22. [Pontos de atenção e dívidas técnicas](#22-pontos-de-atenção-e-dívidas-técnicas)
 
 ---
 
@@ -37,7 +43,7 @@ flowchart LR
     B["Backend REST\nExpress + Prisma\nporta 8000"]
     DB[("SQLite\nbackend/prisma/dev.db")]
     SEI["SEI WebService (SOAP)\nconsultarProcedimento,\nlistarAndamentos,\nlistarUnidades,\nlistarUsuarios"]
-    LLM["Google Gemini\n(geração de resumo)"]
+    LLM["Google Gemini\n(resumos e IA)"]
     AD["Active Directory\n(LDAP)"]
 
     U --> F
@@ -50,7 +56,7 @@ flowchart LR
 
 - **Frontend**: SPA React (`frontend/`), servida em dev pelo Vite na porta `8443`.
 - **Backend**: API Express (`backend/`), porta `8000`, banco **SQLite** via Prisma.
-- **Integrações externas**: SEI (SOAP), Google Gemini (resumos), Active Directory (autenticação LDAP, opcional).
+- **Integrações externas**: SEI (SOAP), Google Gemini (resumos e sugestão de encaminhamento), Active Directory (autenticação LDAP, opcional).
 - **Importante**: a API do SEI **não permite listar processos** — só consulta individual por número. Por isso todo fluxo parte de números informados pelo usuário (cadastro/importação) e é atualizado sob demanda (sincronização).
 
 ---
@@ -60,17 +66,17 @@ flowchart LR
 | Item         | Convenção                                                                                                                                                                 |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Base URL     | `VITE_API_URL` ou `http://127.0.0.1:8000/api` (`frontend/src/api.ts`)                                                                                                     |
-| Autenticação | Header`Authorization: Bearer <JWT>` em todas as rotas (exceto `/login`)                                                                                                   |
-| Erros        | JSON`{ "error": "<mensagem>" }` com status HTTP adequado (400/401/403/404/409/413/422/500)                                                                                |
+| Autenticação | Header `Authorization: Bearer <JWT>` em todas as rotas (exceto `/login`)                                                                                                  |
+| Erros        | JSON `{ "error": "<mensagem>" }` com status HTTP adequado (400/401/403/404/409/413/422/500)                                                                                |
 | Idioma       | **Rotas de API, subrotas e parâmetros de URL da navegação em português**; _query params_ de filtro em inglês (`page`, `limit`, `search`, `status`, `unit`, `dateFrom`...) |
-| Sessão       | Token + usuário no`localStorage` (`cremepe_token`, `cremepe_user`); **não há endpoint de logout** (o logout é apenas cliente)                                             |
+| Sessão       | Token + usuário no `localStorage` (`cremepe_token`, `cremepe_user`); **não há endpoint de logout** (o logout é apenas cliente)                                             |
 
 Montagem das rotas no backend (`backend/src/index.ts`):
 
 | Prefixo              | Router                | Assunto                                              |
 | -------------------- | --------------------- | ---------------------------------------------------- |
 | `/api/autenticacao`  | `routes/auth.ts`      | Login, perfil, unidades do usuário                   |
-| `/api/processos`     | `routes/processes.ts` | Processos, sincronização, resumo, anotações          |
+| `/api/processos`     | `routes/processes.ts` | Processos, sincronização, resumo, anotações, **sugestão de encaminhamento** |
 | `/api/etiquetas`     | `routes/tags.ts`      | Tags                                                 |
 | `/api/administracao` | `routes/admin.ts`     | Usuários, registros e configurações (**admin only**) |
 | `/api/sei`           | `routes/sei.ts`       | Unidades CREMEPE do SEI                              |
@@ -131,13 +137,19 @@ Detalhes:
 | Rota                                      | Descrição                                                                                                               |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `GET /autenticacao/usuario-atual`         | Dados do usuário do token (usado no refresh)                                                                            |
-| `GET /autenticacao/perfil`                | Perfil completo**+ unidades vinculadas** (`user_units`) + `unitsSyncedAt` + `username`                                  |
+| `GET /autenticacao/perfil`                | Perfil completo **+ unidades vinculadas** (`user_units`) + `unitsSyncedAt` + `username`                                  |
 | `PUT /autenticacao/perfil`                | Altera `name` **ou** troca a senha (`currentPassword`/`newPassword`) — **bloqueado** para usuários AD (`authSource: ad`) |
-| `POST /autenticacao/sincronizar-unidades` | Refaz as unidades do usuário:**admin → todas as unidades CREMEPE**; demais → `buscarUnidadesDoUsuario(username)`       |
+| `POST /autenticacao/sincronizar-unidades` | Refaz as unidades do usuário: **admin → todas as unidades CREMEPE**; demais → `buscarUnidadesDoUsuario(username)`       |
 
 ---
 
 ## 4. Permissões e controle de acesso
+
+> Levantamento consolidado do código real (rotas do backend, guards e UI).
+> **Modelo vigente**: o **analista vê TUDO o que o administrador vê** (sem mascaramento —
+> o campo `acessoRestrito` foi removido do sistema), mas **não executa as ações exclusivas
+> do admin**: excluir processos, acessar a administração, sincronizar finalizados e excluir
+> anotações de terceiros. O **assistente** continua restrito às suas unidades.
 
 ### 4.1 Papéis
 
@@ -147,9 +159,11 @@ O banco usa `role` como string. Na prática, o código só trata **três papéis
 | ------------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `admin`      | seed / criado pelo admin              | Acesso total (ver, sincronizar e excluir finalizados; administração)                                                            |
 | `analista`   | seed / atribuído pelo admin           | **Visibilidade total igual à do admin** (lista, detalhes e processos Restritos **sem máscara**); as ações exclusivas de admin continuam negadas (exclusão, painel, sincronizar finalizado) |
-| `assistente` | criado automaticamente no 1º login AD | Vê**apenas** processos de suas unidades vinculadas                                                                              |
+| `assistente` | criado automaticamente no 1º login AD | Vê **apenas** processos de suas unidades vinculadas                                                                              |
 
 > Os papéis efetivos são **admin, analista e assistente** — `protocolo`/`gestor` não existem (comentário do schema removido; nenhum usuário os usa). O rótulo no menu (`roleLabels`) conhece admin/assistente/analista.
+>
+> Obs.: o schema tem `@default("analista")`, o login AD cria `assistente` e o modal de usuários abre em `assistente` — três padrões diferentes (ver §22).
 
 ### 4.2 Unidades do usuário
 
@@ -157,19 +171,60 @@ O banco usa `role` como string. Na prática, o código só trata **três papéis
 - Preenchida no 1º login AD, ou por `POST /autenticacao/sincronizar-unidades` (perfil), ou por `POST /administracao/usuarios/:id/sincronizar-unidades` (admin).
 - Admin recebe **todas** as unidades CREMEPE; demais recebem as unidades cuja lista de usuários do SEI contém a sigla (`listarUsuariosPorUnidade`).
 
-### 4.3 Regras por ação (funções `verificarAcessoProcesso` / `permissaoDeAcesso`)
+### 4.3 Matriz: o que cada papel vê em cada tela
 
-| Ação                                              | admin | assistente                                                                                 | analista                                                               |
-| ------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| Listar (`GET /processos`)                         | tudo  | intersecta com suas unidades (sem unidades → lista vazia)                                  | tudo, **sem mascaramento** (igual admin) |
-| Ver detalhe, anotar, resumir, editar, sincronizar | ok    | 403 se processo fora de suas unidades                                                      | liberado em **qualquer processo** (sem restrição de unidade/nível; sincronizar finalizado → 403, só admin) |
-| Cadastrar processo | ok | precisa que **alguma unidade aberta** do processo esteja entre as suas (403 caso contrário) | idem assistente |
-| Sincronizar processo**finalizado**                | ok    | **403** ("Somente administradores...")                                                     | **403**                                                                |
-| Excluir processo                                  | ok    | 403                                                                                        | 403                                                                    |
-| Administração (`/api/administracao/*`)            | ok    | 403 (`adminOnly`)                                                                          | 403                                                                    |
+| Página (rota) | admin | analista | assistente |
+|---|---|---|---|
+| **Dashboard** `/` | Todos os processos (KPIs, evolução, unidades, top tipos) e contagem de parados | **Idêntico ao admin** — sem linhas mascaradas, gráficos sem distorção | Só processos de suas unidades; sem unidades → zeros/sem dados |
+| **Processos** `/processos` | Lista completa | **Lista completa** (Restritos fora das unidades vêm **integros**) | Só processos cujas unidades intersectam as dele; sem unidades → lista vazia |
+| **Sem Resumo** `/processos/sem-resumo` | Todos sem resumo | **Idêntico ao admin** | Só os sem resumo das suas unidades |
+| **Detalhe** `/processo/:id` | Tudo: dados, resumo, anotações, andamentos, relacionados, ações | **Tudo, em qualquer processo** — mesmos dados e mesma UI do admin, menos o botão Excluir | Nas suas unidades → tudo; fora → **403** ("Acesso negado") |
+| **Cadastrar** `/novo-processo` | Cria qualquer processo | Cria **apenas** se alguma unidade aberta do processo estiver entre as dele (senão 403) | Idem analista |
+| **Sincronização** `/sincronizacao` | Vê e sincroniza tudo (inclusive finalizados) | Lista completa; sincroniza qualquer processo **exceto finalizados** (botão desabilitado + 403 no backend) | Só suas unidades; finalizados desabilitados |
+| **Parados** `/parados` | Todos os em-andamento parados (exclui filhos anexados) | **Idêntico ao admin** | Só os parados de suas unidades |
+| **Relatórios** `/relatorios` | Recorte completo + exports | **Idêntico ao admin** (sem mascaramento nos gráficos) | Recorte só das suas unidades |
+| **Encaminhar** `/sugestao-encaminhamento` | Sugestão de unidade inicial (qualquer usuário autenticado) | Idem | Idem |
+| **Tags** `/etiquetas` | CRUD completo | **CRUD completo** (sem gate) | **CRUD completo** (sem gate) |
+| **Administração** `/administracao` | Menu + 5 abas (Usuários, Config SEI, Logs, Auditoria, Sistema) | Menu **oculto**; ⚠️ a **rota não é guardada no front** — digitando a URL a UI abre, mas todas as APIs dão 403 (dados protegidos no backend) | Idem analista |
+| **Perfil** `/perfil` | KPIs: "que tenho acesso" = todos; unidades = todas as CREMEPE na sincronização | KPIs: acesso = todos; "das minhas unidades" = interseção das unidades dele | KPIs: acesso = suas unidades; sem unidade → 0 |
+| **Login / Sessão** | Todos os papéis: mesmo fluxo (a única diferença é **onde a senha é validada**: local = bcrypt / AD = LDAP) | | |
+
+### 4.4 Ações por papel (backend)
+
+Funções `verificarAcessoProcesso` / `permissaoDeAcesso`:
+
+| Ação | admin | analista | assistente |
+|---|---|---|---|
+| Listar (`GET /processos`) | tudo | tudo, **sem mascaramento** | intersecta com suas unidades (sem unidades → lista vazia) |
+| Ver detalhe/resumo/anotações/andamentos/país/exportar | ✅ | ✅ **qualquer processo** (sem restrição de unidade/nível) | ✅ só nas suas unidades (senão 403) |
+| Criar/editar anotação | ✅ | ✅ qualquer processo | ✅ nas unidades |
+| Editar anotação de outro | ❌ (só autor) | ❌ só autor | ❌ só autor |
+| Excluir anotação de outro | ✅ | ❌ | ❌ |
+| Gerar/salvar resumo | ✅ | ✅ qualquer processo | ✅ nas unidades |
+| Alterar status (finalizado ↔ em andamento) | ✅ | ✅ qualquer processo (**inclusive reabrir/finalizar**) | ✅ nas suas unidades |
+| Editar tags do processo | ✅ | ✅ qualquer processo | ✅ nas unidades |
+| Cadastrar/importar processo | ✅ qualquer | só com unidade em comum | só com unidade em comum |
+| Sincronizar processo **finalizado** | ✅ | ❌ 403 | ❌ 403 |
+| Sincronizar em lote | ✅ tudo | pula finalizados | idem |
+| **Excluir processo** | ✅ | ❌ 403 | ❌ 403 |
+| Administração (`/api/administracao/*`) | ✅ | ❌ (`adminOnly`) | ❌ |
+| Criar/editar/excluir **tags** (global) | ✅ | ✅ | ✅ |
+| **Sugestão de encaminhamento** | ✅ | ✅ | ✅ (qualquer autenticado) |
+| Sincronizar **minhas** unidades | ✅ → todas CREMEPE | → unidades onde o username consta no SEI | idem |
+| Alterar senha própria | ✅ (local) | ✅ (local) | ✅ (local) — AD bloqueado para todos |
 
 - Siglas consideradas do processo = siglas de `unidades` + sigla de `unidadeAtual`.
 - A comparação de unidade em filtros/listagens é feita por _contains_ no JSON (`"sigla":"X"`).
+
+### 4.5 Apontamentos e inconsistências abertas
+
+1. **Rota `/administracao` sem guarda no front** (`App.tsx` não verifica `user.role`) — só o menu a esconde; a UI abre para qualquer logado (API protegida, mas UX ruim).
+2. **Tags sem qualquer restrição de papel** — assistente pode editar/excluir tags criadas por outros.
+3. **Assistente pode marcar processo como finalizado** (toggle usa regra de unidade, não de papel) — enquanto *sincronizar* finalizado é admin-only.
+4. **Analista pode reabrir/finalizar qualquer processo** pelo toggle de status (nunca houve regra admin-only no `PUT`) — consequência do modelo; avaliar se o toggle de finalizado deveria ser admin-only como a sincronização.
+5. **Três padrões de papel inicial**: schema `analista`, login AD `assistente`, modal `assistente`.
+
+Itens resolvidos: ~~máscara em `/parados`~~, ~~distorção de gráficos por mascaras~~, ~~`handleDelete` morto no ProcessList~~, ~~papéis `protocolo`/`gestor` fantasmas~~ — mascaramento removido do sistema inteiro (25/09/2026).
 
 ---
 
@@ -255,7 +310,7 @@ Serviço em `backend/src/services/sei.ts` — monta envelopes XML e envia `POST`
 
 | Serviço SEI                     | Uso                                                                                                                                                               | Observações                                                                                                                                  |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `consultarProcedimento`         | Dados do processo (tipo, especificação, autuação, nível, assuntos, interessados, unidade atual, unidades abertas, relacionados, anexados, último andamento, link) | Tenta primeiro a`unidadeAtualId` salva; depois **cada unidade CREMEPE** até encontrar; se `SEI_ID_UNIDADE` estiver definido, restringe a ela |
+| `consultarProcedimento`         | Dados do processo (tipo, especificação, autuação, nível, assuntos, interessados, unidade atual, unidades abertas, relacionados, anexados, último andamento, link) | Tenta primeiro a `unidadeAtualId` salva; depois **cada unidade CREMEPE** até encontrar; se `SEI_ID_UNIDADE` estiver definido, restringe a ela |
 | `listarAndamentos`              | Histórico de movimentações por unidade                                                                                                                            | Para cada unidade, envia tarefas 1..50 (cobertura de tipos de andamento)                                                                     |
 | `listarUnidades`                | Unidades acessíveis ao serviço                                                                                                                                    | **Cache em memória de 5 min**; filtra siglas que começam com `CREMEPE`                                                                       |
 | `listarUsuarios`                | Usuários de uma unidade                                                                                                                                           | Usado para descobrir as unidades de um usuário AD                                                                                            |
@@ -352,10 +407,10 @@ Rotas sob `/api/processos/:id/anotacoes`:
 
 | Ação                             | Regra                                                             |
 | -------------------------------- | ----------------------------------------------------------------- |
-| `POST`                           | Qualquer usuário com acesso ao processo; grava`userId`/`userName` |
+| `POST`                           | Qualquer usuário com acesso ao processo; grava `userId`/`userName` |
 | `GET`                            | Lista (mais recente primeiro) — exibidas no detalhe               |
 | `PUT /:id/anotacoes/:anotacaoId` | **Somente o autor** pode editar                                   |
-| `DELETE`                         | Autor**ou admin**                                                 |
+| `DELETE`                         | Autor **ou admin**                                                |
 
 O detalhe do processo traz limite inicial de anotações visíveis com "Mostrar todas (N)".
 
@@ -378,12 +433,12 @@ O detalhe do processo traz limite inicial de anotações visíveis com "Mostrar 
 | `page`, `limit`       | Paginação (`limit` máx. **500**)                                                            |
 | `search`              | `numeroSei`, `especificacao`, `interessados`, `assuntos`, `resumoIa` (contains)             |
 | `status`              | `em_andamento` (inclui legado `em_analise`) ou `finalizado`                                 |
-| `unit`                | Uma sigla ou lista`SIGLA1,SIGLA2` — casa com `unidadeAtual` **ou** `unidades`               |
+| `unit`                | Uma sigla ou lista `SIGLA1,SIGLA2` — casa com `unidadeAtual` **ou** `unidades`              |
 | `resumo`              | `1` = com resumo, `0` = sem                                                                 |
 | `andamentos=0`        | Só processos sem andamentos (`andamentos = "[]"`)                                           |
 | `documentos=0`        | Só processos cujos andamentos não citam "Documento"                                         |
 | `tipo`, `nivelAcesso` | Igualdade exata                                                                             |
-| `dateFrom`, `dateTo`  | Filtro sobre`dataAutuacao` (formato `DD/MM/AAAA` convertido para comparar com `YYYY-MM-DD`) |
+| `dateFrom`, `dateTo`  | Filtro sobre `dataAutuacao` (formato `DD/MM/AAAA` convertido para comparar com `YYYY-MM-DD`) |
 | `sort`, `dir`         | `numeroSei`, `especificacao`, `dataAutuacao`, `createdAt`                                   |
 
 Aplicação de permissão na listagem: assistente intersecta com suas unidades (sem unidades → `"__NO_ACCESS__"`); **analista e admin recebem os mesmos objetos completos** — o mascaramento (`acessoRestrito`) foi **removido do sistema**.
@@ -430,7 +485,19 @@ Rotas de listagem especiais no frontend:
 
 ---
 
-## 16. Administração
+## 16. Sugestão de encaminhamento
+
+Funcionalidade que responde **"para qual unidade inicial encaminhar uma nova demanda?"**,
+aprendendo com os andamentos de processos semelhantes da base histórica.
+
+- **Tela** `/sugestao-encaminhamento` (item de menu **Encaminhar**, visível a qualquer usuário autenticado): descrição da demanda (texto), tipo do SEI (opcional) e até 20 arquivos (PDF/DOCX/TXT/planilhas…); devolve um **ranking de unidades** com peso, nº de casos e exemplos clicáveis (com a trilha do processo).
+- **Endpoint**: `POST /api/processos/sugestao-encaminhamento` (multipart: `descricao`, `tipo`, `files`); erros 400 (sem conteúdo), 413 (texto > 90.000), 422 (sem texto extraível); cada sugestão é registrada na **auditoria**.
+- **Inteligência**: k-NN com TF-IDF sobre a base (rótulo = unidade de **maior permanência**) + **regra de domínio** para devoluções/reembolsos (→ SECON). Documentação completa, avaliação e limitações: **[`ENCAMINHAMENTO.md`](./ENCAMINHAMENTO.md)**.
+- **Dicionário de trâmites**: `npm run gerar:dicionario` (em `backend/`) gera `dicionario-tramites.xlsx` na raiz — dicionário das **unidades iniciais** por situação, por setor e de todos os trâmites iniciais observados, para **conferência com os setores** (detalhes em `ENCAMINHAMENTO.md`).
+
+---
+
+## 17. Administração
 
 **Tela `/administracao`** — item de menu visível **somente para `admin`**; backend reforça com `authMiddleware + adminOnly` em todo `/api/administracao/*`. A tela tem 5 abas e um painel de KPIs (ativos/inativos/AD/locais).
 
@@ -440,12 +507,12 @@ Rotas de listagem especiais no frontend:
 | Unidades de um usuário | `POST /administracao/usuarios/:id/sincronizar-unidades`, `POST /administracao/usuarios/:id/unidades` | Sincronizar via SEI (admin → todas; demais → busca por sigla) **ou** atribuir manualmente (substitui o conjunto atual; catálogo de `GET /sei/unidades`) |
 | **Configurações SEI** | `GET/PUT /administracao/configuracoes`, `POST /administracao/testar-conexao` | Carrega os valores salvos; **banco sobrescreve o `.env` quando não vazio** (`seiConfig` em memória, sem reiniciar); chave de acesso **mascarada** no GET (`********`) e nunca regravada; **"Testar Conexão" é real** — chama o SEI (`listarUnidades`) com os valores do formulário, mesmo ainda não salvos |
 | **Logs de Sincronização** | `GET /administracao/registros` | Filtros (tipo, status, busca por nº/mensagem, período), paginação, **export CSV**, detalhe em diálogo, coluna **Usuário responsável** (`SyncLog.userId`) e link para o processo |
-| **Auditoria** | `GET /administracao/auditoria` | **Todas as ações do sistema exceto as sincronizações de processo** (essas ficam nos logs), gravadas em `audit_logs`: **login** (sucesso/falha, local/AD, primeiro acesso) e **logout**, cadastro/importação/atualização/**exclusão de processos**, **geração/salvamento de resumos**, **anotações** (criar/editar/excluir), **exportações/downloads** (PDF panorama e relatórios CSV/PDF/XLSX), gestão de usuários e unidades, salvar configurações — com usuário, ação, alvo, detalhe; busca + paginação |
+| **Auditoria** | `GET /administracao/auditoria` | **Todas as ações do sistema exceto as sincronizações de processo** (essas ficam nos logs), gravadas em `audit_logs`: **login** (sucesso/falha, local/AD, primeiro acesso) e **logout**, cadastro/importação/atualização/**exclusão de processos**, **geração/salvamento de resumos**, **anotações** (criar/editar/excluir), **exportações/downloads** (PDF panorama e relatórios CSV/PDF/XLSX), gestão de usuários e unidades, **sugestões de encaminhamento**, salvar configurações — com usuário, ação, alvo, detalhe; busca + paginação |
 | **Sistema** | `GET /administracao/sistema` (+ teste de conexão) | Saúde da API, versão do Node, tamanho do SQLite, contagens (usuários/processos/logs/auditoria) e **configuração SEI efetiva** (URL, sigla, unidade, chave definida e sua origem `.env`/configurações) |
 
 ---
 
-## 17. Perfil e unidades do usuário
+## 18. Perfil e unidades do usuário
 
 **Tela `/perfil`** (`Profile.tsx`) — mesmo padrão da Administração: **KPIs no topo + barra de abas** (Dados Pessoais | Unidades SEI | Atividades | Preferências), largura total.
 
@@ -461,20 +528,20 @@ Rotas de listagem especiais no frontend:
 
 ---
 
-## 18. Segurança, erros e limites
+## 19. Segurança, erros e limites
 
 - **JWT** (segredo `JWT_EXPIRES_IN`, default 24h) verificado em `authMiddleware`; rotas de admin com `adminOnly` adicional.
 - **Senhas**: bcrypt custo 12; usuários AD guardam `passwordHash: ""` (autenticação só no LDAP). Política: **mínimo de 8 caracteres** na criação/redefinição pela administração **e na troca pelo próprio usuário** (perfil), validado no front e no back.
 - **401 global**: dispara a saída automática da sessão no frontend; **403** devolve `{ error }` com a mensagem de acesso.
 - **CORS**: apenas `localhost/127.0.0.1` nas portas `5173` e `8443` (com credenciais).
 - **Uploads**: `multer` em `backend/uploads/`, máx. 50 MB/arquivo, 20 arquivos, lista branca de extensões; arquivos apagados após a geração (`finally`).
-- **Limites de resumo**: texto agregado ≤ 90.000 caracteres (413).
+- **Limites de texto**: resumo e sugestão de encaminhamento ≤ 90.000 caracteres agregados (413).
 - **Concorrência**: sincronização em lote = 5 simultâneos (protege o SEI e a API).
-- **Caches**: unidades CREMEPE (5 min) e unidades por usuário consultadas sob demanda.
+- **Caches**: unidades CREMEPE (5 min) e base de vizinhos da sugestão (10 min, invalidada por contagem de processos).
 
 ---
 
-## 19. Mapa de rotas do frontend
+## 20. Mapa de rotas do frontend
 
 Rotas do _browser_ (React Router, `App.tsx`) — todas em português; URL desconhecida redireciona para `/`:
 
@@ -485,6 +552,7 @@ Rotas do _browser_ (React Router, `App.tsx`) — todas em português; URL descon
 | `/processos/sem-resumo` | Lista só sem resumo        | Sem Resumo                   |
 | `/processo/:id`         | Detalhes do processo       | (clicando num processo)      |
 | `/novo-processo`        | Cadastrar/importar números | Cadastrar Processo           |
+| `/sugestao-encaminhamento` | Sugestão de encaminhamento | Encaminhar                |
 | `/etiquetas`            | Gerenciar tags             | Tags                         |
 | `/relatorios`           | Relatórios e exports       | Relatórios                   |
 | `/sincronizacao`        | Sincronização em lote      | Sincronização                |
@@ -496,7 +564,7 @@ Validação extra: regex `/^\/processo\/[a-f0-9-]+$/` é aceita como detalhe; de
 
 ---
 
-## 20. Tabela completa de endpoints
+## 21. Tabela completa de endpoints
 
 ### `/api/autenticacao`
 
@@ -519,14 +587,15 @@ Validação extra: regex `/^\/processo\/[a-f0-9-]+$/` é aceita como detalhe; de
 | GET        | `/parados`                   | Processos parados                                        |
 | POST       | `/`                          | Cadastra processo (consulta SEI)                         |
 | POST       | `/sincronizar-lote`          | Sincronização em lote (conc. 5)                          |
+| POST       | `/sugestao-encaminhamento`   | **Sugere unidade inicial** (multipart: `descricao`, `tipo`, `files`) |
 | GET        | `/:id`                       | Detalhes                                                 |
-| PUT        | `/:id`                       | Atualiza status e/ou`tagIds`                             |
+| PUT        | `/:id`                       | Atualiza status e/ou `tagIds`                            |
 | DELETE     | `/:id`                       | Exclui (admin)                                           |
 | POST       | `/:id/sincronizar`           | Sincroniza com SEI                                       |
-| GET        | `/:id/andamentos`            | Andamentos**ao vivo** do SEI                             |
+| GET        | `/:id/andamentos`            | Andamentos **ao vivo** do SEI                            |
 | GET        | `/:id/pais`                  | Processos que anexam este (busca reversa)                |
-| POST       | `/:id/resumo`                | Gera resumo (multipart:`files`, `textoManual`) — preview |
-| POST       | `/:id/resumo/save`           | Salva`{ resumo }`                                        |
+| POST       | `/:id/resumo`                | Gera resumo (multipart: `files`, `textoManual`) — preview |
+| POST       | `/:id/resumo/save`           | Salva `{ resumo }`                                       |
 | GET        | `/:id/resumo`                | Resumo salvo                                             |
 | GET/POST   | `/:id/anotacoes`             | Lista / cria anotação                                    |
 | PUT/DELETE | `/:id/anotacoes/:anotacaoId` | Editar (autor) / excluir (autor ou admin)                |
@@ -562,21 +631,23 @@ Validação extra: regex `/^\/processo\/[a-f0-9-]+$/` é aceita como detalhe; de
 
 ---
 
-## 21. Pontos de atenção e dívidas técnicas
+## 22. Pontos de atenção e dívidas técnicas
 
 Itens conhecidos do estado atual (úteis para manutenção):
 
 1. **`POST /processos/importar` removido** — o endpoint de importação em lote não tinha interface (código morto) e foi eliminado; a tela `/novo-processo` continua cadastrando sequencialmente via `POST /processos`. Recuperar do histórico do git se necessário.
 2. **`generateSummaryFromDocs` removido** — era código morto (chamava `/processos/:id/resumo-documentos`, rota inexistente no backend); a função foi eliminada junto com `batchImport`, `getSummary` e `listAndamentos` (exports sem uso no `api.ts`).
-3. **Configurações SEI (regra de sobreposição)** — agora funcionais: a UI lê/salva via `GET/PUT /configuracoes`, o serviço SEI usa a configuração **efetiva** (`seiConfig` = `.env` sobrescrito pelo banco quando o valor não é vazio, recarregada no startup e ao salvar) e o teste de conexão é real. **Valores vazios no banco mantêm os do `.env`** (para "limpar" uma chave, apague a linha); a chave de acesso só é **troca** (nunca sai em claro nem volta mascarada para o banco). Salvar tem efeito imediato, sem reiniciar o servidor.
+3. **Configurações SEI (regra de sobreposição)** — funcionais: a UI lê/salva via `GET/PUT /configuracoes`, o serviço SEI usa a configuração **efetiva** (`seiConfig` = `.env` sobrescrito pelo banco quando o valor não é vazio, recarregada no startup e ao salvar) e o teste de conexão é real. **Valores vazios no banco mantêm os do `.env`** (para "limpar" uma chave, apague a linha); a chave de acesso só é **troca** (nunca sai em claro nem volta mascarada para o banco). Salvar tem efeito imediato, sem reiniciar o servidor.
 4. **Papéis `protocolo`/`gestor` removidos** — só existiam no comentário do schema (removido); nenhum usuário os utiliza.
 5. **Sem sincronização automática** — não há job cron; tudo é sob demanda (página de sincronização, botões individuais).
 6. **Sem OCR** — imagens entram no resumo como marcador textual.
 7. **Filtro por unidade** usa _contains_ em JSON (`"sigla":"X"`), sensível a grafias exatas.
 8. **Documentos do SEI — funções removidas** — `consultarDocumento`, `obterLinkDocumento` e `extrairDocumentos` eram código morto (sem endpoint/UI); foram eliminadas do `sei.ts`. Reintroduzir apenas com caso de uso real.
-9. **`docs` desatualizados removidos** — `fluxo-importacao-sincronizacao.md` (substituído por este arquivo) e `frontend/src/imports/ESPECIFICACAO.md` (especificação de planejamento antiga, que contradizia a implementação) foram **removidos**; histórico preservado no git.
+9. **Docs antigos unificados** — `fluxo-importacao-sincronizacao.md` (substituído por este arquivo) e `frontend/src/imports/ESPECIFICACAO.md` (especificação de planejamento antiga, que contradizia a implementação) foram **removidos**; `FLUXOS.md` e `PAPEIS_E_PERMISSOES.md` foram **absorvidos** neste `DOCS.md`. Histórico preservado no git.
 10. **Tema escuro pendente** — a preferência já é coletada e salva no Perfil (`localStorage` `cremepe_tema`), mas a aplicação do modo escuro **ainda não foi implementada** (próxima etapa).
-12. **Depreciação `package.json#prisma`** — a config de seed no `package.json` (usada por `pnpm prisma db seed`) será removida no Prisma 7; migrar para `prisma.config.ts` quando atualizar a versão.
 11. **`username` legado (backfill)** — na migration `user_username`, contas AD receberam `username` = sAMAccountName (campo anterior) e locais receberam o **prefixo do e-mail**; se algum não seguir a convenção, corrija no modal de usuários da administração (campo "Username") — ele também é usado na busca de unidades no SEI.
+12. **Depreciação `package.json#prisma`** — a config de seed no `package.json` (usada por `pnpm prisma db seed`) será removida no Prisma 7; migrar para `prisma.config.ts` quando atualizar a versão.
+13. **Permissões — inconsistências abertas** — ver §4.5 (rota `/administracao` sem guarda no front, tags sem restrição de papel, toggle de status com regras de unidade e não de papel, três padrões de papel inicial).
+14. **Sugestão de encaminhamento — limitações conhecidas** — regra de domínio para reembolso, casos em aberto (CIM/CPM → ADM ou SEATE; denúncia → corregedoria ou GABIN) e critérios de avaliação: ver [`ENCAMINHAMENTO.md`](./ENCAMINHAMENTO.md).
 
 > Mantenha este documento sincronizado ao alterar rotas, permissões ou fluxos principais.

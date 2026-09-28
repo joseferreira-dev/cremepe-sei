@@ -345,6 +345,44 @@ export async function registrarExportacao(payload: {
   });
 }
 
+// ---- Sugestão de encaminhamento ----
+export interface ExemploSugestao {
+  id: string;
+  numeroSei: string;
+  tipo: string | null;
+  dataAutuacao: string | null;
+  trilha: string[];
+}
+
+export interface SugestaoUnidade {
+  sigla: string;
+  descricao: string | null;
+  peso: number;
+  casos: number;
+  exemplos: ExemploSugestao[];
+}
+
+export interface ResultadoSugestao {
+  estrategia: 'vizinhos' | 'tipo' | 'nenhuma' | 'regra';
+  totalBase: number;
+  vizinhos: number;
+  caracteres: number;
+  sugestoes: SugestaoUnidade[];
+}
+
+/** Analisa texto e/ou arquivos de uma nova demanda e sugere a unidade de encaminhamento. */
+export async function sugerirEncaminhamento(
+  descricao: string,
+  tipo: string,
+  files: File[]
+): Promise<ResultadoSugestao> {
+  const form = new FormData();
+  files.forEach((f) => form.append('files', f));
+  if (descricao) form.append('descricao', descricao);
+  if (tipo) form.append('tipo', tipo);
+  return request('/processos/sugestao-encaminhamento', { method: 'POST', body: form });
+}
+
 // ---- Annotations ----
 export async function listAnnotations(processId: string): Promise<Annotation[]> {
   return request(`/processos/${processId}/anotacoes`);

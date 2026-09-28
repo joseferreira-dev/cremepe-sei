@@ -11,6 +11,7 @@ import Admin from './components/Admin';
 import Reports from './components/Reports';
 import SyncPage from './components/SyncPage';
 import StalledProcesses from './components/StalledProcesses';
+import RoutingSuggestion from './components/RoutingSuggestion';
 import Profile from './components/Profile';
 import { DialogProvider } from './components/ui/Dialog';
 import type { User } from './types';
@@ -22,7 +23,7 @@ function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User)
 
   useEffect(() => {
     // Redireciona para dashboard se a URL não existe
-    const validPaths = ['/', '/processos', '/processos/sem-resumo', '/novo-processo', '/etiquetas', '/relatorios', '/sincronizacao', '/parados', '/administracao', '/perfil'];
+    const validPaths = ['/', '/processos', '/processos/sem-resumo', '/novo-processo', '/etiquetas', '/relatorios', '/sincronizacao', '/parados', '/administracao', '/perfil', '/sugestao-encaminhamento'];
     const isProcessDetails = /^\/processo\/[a-f0-9-]+$/.test(location.pathname);
     if (!validPaths.includes(location.pathname) && !isProcessDetails && location.pathname !== '/') {
       navigate('/', { replace: true });
@@ -37,6 +38,7 @@ function AppRoutes({ user, setUser, onLogout }: { user: User; setUser: (u: User)
         <Route path="/processos/sem-resumo" element={<ProcessList onlyWithoutResumo />} />
         <Route path="/processo/:id" element={<ProcessDetails user={user} />} />
         <Route path="/novo-processo" element={<NewProcess />} />
+        <Route path="/sugestao-encaminhamento" element={<RoutingSuggestion />} />
         <Route path="/etiquetas" element={<TagsManager />} />
         <Route path="/relatorios" element={<Reports />} />
         <Route path="/sincronizacao" element={<SyncPage user={user} />} />
