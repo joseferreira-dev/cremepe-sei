@@ -79,6 +79,31 @@ function parseDataHora(s: string | null | undefined): number {
  */
 const UNIDADES_EXCLUIDAS = ["PROTOCOLO", "ARQUIVO"];
 
+/**
+ * Cadeiras de autoridade (sigla `CREMEPE/<pessoa>`, sem setor subordinado):
+ * o processo nunca é encaminhado "para" a autoridade — quem recebe e conduz
+ * é a **porta de entrada** da estrutura dela. A autoridade só assina/decide
+ * no fim, e a permanência longa nela a faria vencer o rótulo.
+ *
+ * Mapeamento validado na base histórica (alimentador imediato / "passa por
+ * antes de chegar à autoridade"):
+ * - PRESIDENTE          <- PRESI/GABIN   (GABIN antes em 124/134 = 93%)
+ * - 3º VICE-PRESIDENTE  <- 3º VIP./DEFIS (DEFIS antes em 20/20 = 100%)
+ * - VICE-CORREGEDOR     <- COR/DEPRO     (DEPRO antes em 95/96 = 99%)
+ * - SECRETÁRIO GERAL    <- SECRET. G./SEATE (alimentador imediato 71%)
+ * - 1º TESOUREIRO       <- TESOURARIA/SECOP (alimentador imediato 71%)
+ * Sem entrada clara (mantidos como rótulo): 1º/2º VICE-PRESIDENTE (SEBIB 48%,
+ * CEM 26%, GABIN 12%), 1º SECRETÁRIO e demais cadeiras com n≈0.
+ */
+const ENTRADA_AUTORIDADE = new Map<string, string>([
+  ["CREMEPE/PRESIDENTE", "CREMEPE/PRESI/GABIN"],
+  ["CREMEPE/3º VICE-PRESIDENTE", "CREMEPE/3º VIP./DEFIS"],
+  ["CREMEPE/VICE-CORREGEDOR", "CREMEPE/COR/DEPRO"],
+  ["CREMEPE/CORREGEDOR", "CREMEPE/COR/DEPRO"],
+  ["CREMEPE/SECRETÁRIO GERAL", "CREMEPE/SECRET. G./SEATE"],
+  ["CREMEPE/1º TESOUREIRO", "CREMEPE/TESOURARIA/SECOP"],
+]);
+
 interface EntradaTrilha {
   sigla: string;
   /** epoch ms da primeira passagem do processo por esta unidade */
@@ -117,6 +142,8 @@ function excluidaComoRotulo(sigla: string): boolean {
  * - Setores de atendimento (GABIN/SEATE) continuam elegíveis: quando eles
  *   realmente retêm o processo, a permanência os elege naturalmente.
  * - A última unidade usa o tempo até o último andamento (permanência atual).
+ * - Se o vencedor é cadeira de autoridade, o rótulo vira a porta de entrada
+ *   dela (ENTRADA_AUTORIDADE) — ver comentário do mapa.
  */
 function destinoPorPermanencia(bruto: EntradaTrilha[], fimUltimoAndamento: number): string | null {
   const DIA = 86400000;
@@ -134,6 +161,7 @@ function destinoPorPermanencia(bruto: EntradaTrilha[], fimUltimoAndamento: numbe
       melhor = e.sigla;
     }
   }
+  if (melhor) melhor = ENTRADA_AUTORIDADE.get(melhor) ?? melhor;
   return melhor;
 }
 
@@ -402,11 +430,39 @@ const TERMOS_VALOR = new Set([
 ]);
 const SECON_SIGLA = "CREMEPE/TESOURARIA/SECON";
 
+/**
+ * Substantivos de documento: "devolução do certificado/documento" é texto de
+ * instrução de formulário/certidão (boilerplate), nunca devolução de dinheiro.
+ */
+const SUBSTANTIVOS_DOCUMENTO = new Set([
+  "certificado", "certificados", "certidao", "certidoes",
+  "documento", "documentos", "papel", "papeis",
+  "original", "arquivo", "arquivos", "processo", "processos",
+]);
+
+/**
+ * Tokens de contexto (antes/depois) em que um TERMOS_VALOR precisa aparecer
+ * perto do "devol" para valer — evita coocorrência fortuita entre
+ * "devolução do certificado" (formulário) e "anuidade" (certidão) distantes
+ * no texto consolidado.
+ */
+const JANELA_VALOR = 6;
+
 export function eReembolso(texto: string): boolean {
   const toks = tokenizar(texto || "");
+  // Prefixos de reembolso são inequívocos (reembolso, restituição, estorno...).
   if (toks.some((t) => PREFIXOS_REEMBOLSO.some((p) => t.startsWith(p)))) return true;
-  // "devolução" só conta junto de termos de dinheiro (evita devolver documentos).
-  return toks.some((t) => t.startsWith("devol")) && toks.some((t) => TERMOS_VALOR.has(t));
+
+  // "devol*" só dispara com termo de dinheiro POR PERTO e nunca quando o que
+  // se devolve é um documento (boilerplate de formulário/certidão).
+  for (let i = 0; i < toks.length; i++) {
+    if (!toks[i].startsWith("devol")) continue;
+    if (toks.slice(i + 1, i + 4).some((t) => SUBSTANTIVOS_DOCUMENTO.has(t))) continue;
+    const ini = Math.max(0, i - JANELA_VALOR);
+    const fim = Math.min(toks.length, i + JANELA_VALOR + 1);
+    if (toks.slice(ini, fim).some((t) => TERMOS_VALOR.has(t))) return true;
+  }
+  return false;
 }
 
 export async function aplicarRegraReembolso(

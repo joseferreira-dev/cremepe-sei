@@ -492,7 +492,7 @@ aprendendo com os andamentos de processos semelhantes da base histórica.
 
 - **Tela** `/sugestao-encaminhamento` (item de menu **Encaminhar**, visível a qualquer usuário autenticado): descrição da demanda (texto), tipo do SEI (opcional) e até 20 arquivos (PDF/DOCX/TXT/planilhas…); devolve um **ranking de unidades** com peso, nº de casos e exemplos clicáveis (com a trilha do processo).
 - **Endpoint**: `POST /api/processos/sugestao-encaminhamento` (multipart: `descricao`, `tipo`, `files`); erros 400 (sem conteúdo), 413 (texto > 90.000), 422 (sem texto extraível); cada sugestão é registrada na **auditoria**.
-- **Inteligência**: k-NN com TF-IDF sobre a base (rótulo = unidade de **maior permanência**) + **regra de domínio** para devoluções/reembolsos (→ SECON). Documentação completa, avaliação e limitações: **[`ENCAMINHAMENTO.md`](./ENCAMINHAMENTO.md)**.
+- **Inteligência**: k-NN com TF-IDF sobre a base (rótulo = unidade de **maior permanência**, com cadeiras de autoridade — PRESIDENTE, VICES, CORREGEDOR… — remapeadas para a **porta de entrada** da estrutura: GABIN, DEFIS, DEPRO…) + **regra de domínio** para devoluções/reembolsos (→ SECON). Documentação completa, avaliação e limitações: **[`ENCAMINHAMENTO.md`](./ENCAMINHAMENTO.md)**.
 - **Dicionário de trâmites**: `npm run gerar:dicionario` (em `backend/`) gera `dicionario-tramites.xlsx` na raiz — dicionário das **unidades iniciais** por situação, por setor e de todos os trâmites iniciais observados, para **conferência com os setores** (detalhes em `ENCAMINHAMENTO.md`).
 
 ---
