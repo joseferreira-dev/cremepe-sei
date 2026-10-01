@@ -7,7 +7,7 @@ const RESUMO_PROMPT = `Você é um assistente especializado em processos adminis
 
 Analise os documentos abaixo de um processo administrativo e gere um resumo executivo em UM ÚNICO PARÁGRAFO corrido, em texto simples e objetivo (sem Markdown, sem títulos, sem listas, sem negrito, sem asteriscos, sem quebras de linha).
 
-O parágrafo deve permitir que um servidor entenda rapidamente do que trata o processo (assunto principal, partes envolvidas/interessados, tipo de demanda, andamentos e pendências relevantes, setor sugerido para encaminhamento). Use frases curtas e claras. Se alguma informação não for identificável, não invente — simplesmente não a mencione.
+O parágrafo deve ser suficiente para que um servidor entenda todos os detalhes gerais do processo: assunto principal e o contexto que motiva a demanda, partes envolvidas/interessados, tipo de demanda e documentos que a originaram, e o que ocorreu na ordem dos fatos — o que foi feito e em que sequência. Não mencione datas exatas nem prazos dos andamentos: o histórico já traz essa informação. Situação atual e pendências apenas quando estiverem descritas nos documentos; não mencione próximos passos que não estejam no material fornecido. Use frases curtas e claras. Se alguma informação não for identificável, não invente — simplesmente não a mencione.
 
 Responda APENAS com o parágrafo, sem texto adicional.
 

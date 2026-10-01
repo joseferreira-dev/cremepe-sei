@@ -388,7 +388,7 @@ flowchart LR
   - `.txt`/`.csv` → texto puro; `.xls`/`.xlsx` → `xlsx` (aba a aba em CSV); `.odt` → `jszip` + `content.xml`;
   - **imagens** (jpg/png/...) → marcador `[Imagem — OCR não disponível]` (**não há OCR**);
   - falha de extração de um arquivo não derruba o processo (entra um marcador de falha).
-- **Prompt** (`services/gemini.ts`): resumo executivo em **um único parágrafo corrido**, sem Markdown, sem inventar informações — voltado a processos administrativos do CREMEPE.
+- **Prompt** (`services/gemini.ts`): resumo executivo em **um único parágrafo corrido**, sem Markdown, sem inventar informações — voltado a processos administrativos do CREMEPE. Cobre todos os detalhes gerais (contexto, partes, documentos de origem, fatos **na ordem em que ocorreram**, situação/pendências se descritas), **sem datas nem prazos de andamento** (o histórico já traz) e **sem próximos passos** a menos que estejam no material — a sugestão de encaminhamento tem página própria.
 - **Modelos**: `LLM_MODEL` é uma **lista separada por vírgula** (ex.: `gemini-3.8-flash,gemini-3.7-flash,...`) — tenta em sequência até funcionar (fallback por cota/indisponibilidade).
 - **Salvamento é separado**: `POST /:id/resumo` só retorna o preview; `POST /:id/resumo/save` grava `{ resumo }` no banco. Há também `GET /:id/resumo` (retorna `resumoIa`/`resumoGeradoEm`).
 - O usuário pode **editar manualmente** o resumo antes/depóis de salvar (mesmo endpoint de save).
