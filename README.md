@@ -24,8 +24,6 @@ Sistema de Gestão Inteligente de Processos do **CREMEPE** (Conselho Regional de
 │   ├── prisma/          # Schema do banco e seed
 │   └── package.json     # Dependências e scripts do backend
 │
-├── .env                 # Credenciais SEI + LLM (raiz)
-├── dicionario-tramites.xlsx  # Dicionário de trâmites iniciais (gerado)
 ├── DOCS.md              # Documentação geral do sistema
 ├── ENCAMINHAMENTO.md    # Documentação da sugestão de encaminhamento
 └── README.md
