@@ -1,0 +1,195 @@
+# CREMEPE SEI
+
+Sistema de Gestão Inteligente de Processos do **CREMEPE** (Conselho Regional de Medicina de Pernambuco), integrado ao **SEI** (Sistema Eletrônico de Informações) via WebService SOAP e com resumos gerados por **IA**.
+
+## Tecnologias
+
+- **Frontend**: React 19 + Vite 8 + TypeScript + Tailwind CSS v4
+- **Backend**: Node.js + Express + TypeScript + Prisma ORM + SQLite
+- **Integrações**: WebService SOAP do SEI, API de LLM (Google Gemini) para resumos
+
+## Estrutura do projeto
+
+```
+.
+├── frontend/            # Aplicação web (React + Vite + Tailwind)
+│   ├── src/             # Código-fonte (componentes, api, types)
+│   ├── index.html       # HTML shell
+│   ├── vite.config.ts   # Configuração do Vite
+│   └── package.json     # Dependências e scripts do frontend
+│
+├── backend/             # API REST (Express + Prisma + SQLite)
+│   ├── src/             # Código-fonte (rotas, serviços, middleware)
+│   ├── scripts/         # Scripts utilitários (ex.: gerador do dicionário)
+│   ├── prisma/          # Schema do banco e seed
+│   └── package.json     # Dependências e scripts do backend
+│
+├── .env                 # Credenciais SEI + LLM (raiz)
+├── dicionario-tramites.xlsx  # Dicionário de trâmites iniciais (gerado)
+├── DOCS.md              # Documentação geral do sistema
+├── ENCAMINHAMENTO.md    # Documentação da sugestão de encaminhamento
+└── README.md
+```
+
+## Documentação
+
+- **[`DOCS.md`](./DOCS.md)** — documentação geral do sistema: autenticação (local/AD), permissões e matriz por tela, cadastro e importação, sincronização com o SEI, resumo com IA, anotações, tags, dashboard, relatórios, administração, sugestão de encaminhamento, mapa de rotas, tabela completa de endpoints e dívidas técnicas.
+- **[`ENCAMINHAMENTO.md`](./ENCAMINHAMENTO.md)** — em detalhe como funciona a sugestão de unidade de encaminhamento (k-NN sobre a base histórica, regra de domínio de reembolso → SECON), o dicionário de trâmites (`npm run gerar:dicionario`), avaliação, limitações e como testar.
+
+> A API usa **endpoints em português** (`/api/autenticacao`, `/api/processos`, `/api/etiquetas`, `/api/administracao`, `/api/sei`) e as rotas do frontend também (`/processos`, `/relatorios`, `/sincronizacao`...). Após mudanças de rota, reinicie backend e frontend.
+
+## Pré-requisitos
+
+- **Node.js** ≥ 20 (recomendado Node 22+)
+- **pnpm** (ou npm) para gerenciar dependências
+- Acesso ao WebService do SEI (credenciais em `.env`)
+- Chave de API para o provedor de LLM (em `.env`)
+
+## Configuração de ambiente
+
+### 1. Variáveis de ambiente
+
+Crie/edite os arquivos `.env` conforme os exemplos abaixo.
+
+**`backend/.env`** (configuração do servidor e banco):
+
+```env
+# SEI WebService
+SEI_URL=https://sei.cfm.org.br/sei/ws/SeiWS.php
+SEI_SIGLA_SISTEMA=IntWeb
+SEI_IDENTIFICACAO_SERVICO=<sua-chave-de-acesso>
+SEI_ID_UNIDADE=110002083
+
+# LLM
+LLM_API_KEY=<sua-api-key>
+LLM_MODEL=gemini-3.1-pro-preview
+
+# Auth
+JWT_SECRET=<segredo-jwt>
+JWT_EXPIRES_IN=24h
+
+# Server
+HOST=127.0.0.1
+PORT=8000
+
+# Database (SQLite)
+DATABASE_URL=file:./dev.db
+```
+
+**`.env`** (raiz) — pode conter as mesmas credenciais SEI/LLM como fallback; o backend carrega primeiro `backend/.env` e depois `.env` da raiz.
+
+**`frontend/.env`** (opcional) — URL da API usada pelo frontend:
+
+```env
+VITE_API_URL=http://127.0.0.1:8000/api
+```
+
+Se não definida, o frontend usa `http://127.0.0.1:8000/api` por padrão.
+
+### 2. Backend
+
+```bash
+cd backend
+pnpm install
+
+# Aplicar migrações e criar o banco (SQLite)
+pnpm prisma migrate dev
+# ou, se já houver migração:
+pnpm prisma db push
+
+# Executar o seed (administrador e tags iniciais)
+pnpm prisma db seed
+
+# Iniciar o servidor na porta 8000
+pnpm dev
+```
+
+O seed cria o usuário administrador padrão:
+
+- **E-mail**: `admin@cremepe.org.br`
+- **Senha**: `admin123`
+
+> ⚠️ Altere a senha do administrador em produção.
+
+#### Banco de dados: baseline + migrations
+
+- O esquema base está em **uma migration de baseline**: `backend/prisma/migrations/20260925000000_baseline/migration.sql` (as migrations antigas foram consolidadas nela), seguida das migrations posteriores (ex.: `20261005132538_resumo_fonte_texto`, que cria a tabela `process_resumo_fonte` — texto que originou o resumo de IA, mantido **fora de qualquer busca**).
+- `backend/prisma/baseline.db` é um **snapshot com todos os dados atuais** (esquema + registros). Para regenerar o banco do zero mantendo os dados, **pare o backend** e copie o snapshot sobre o banco:
+
+```bash
+# Windows
+copy backend\prisma\baseline.db backend\prisma\dev.db
+# Linux/macOS
+cp backend/prisma/baseline.db backend/prisma/dev.db
+```
+
+- Banco novo vazio: `pnpm prisma migrate dev` aplica a baseline.
+- Para criar um novo ponto de restauração: pare o backend e copie `dev.db` → `baseline.db`. O `baseline.db` está no `.gitignore` (contém dados reais).
+
+### 3. Frontend
+
+```bash
+cd frontend
+pnpm install
+
+# Rodar em desenvolvimento (hot reload)
+pnpm dev
+```
+
+O frontend roda em `http://localhost:8443` (ou na porta definida em `PORT`).
+
+Para produção:
+
+```bash
+cd frontend
+pnpm build        # gera a pasta dist/
+pnpm preview      # serve o build (porta 8443 por padrão)
+```
+
+## Scripts úteis
+
+### Backend (`backend/`)
+
+| Script                    | Descrição                                 |
+| ------------------------- | ----------------------------------------- |
+| `pnpm dev`                | Inicia o servidor em modo desenvolvimento |
+| `pnpm build`              | Compila o TypeScript para`dist/`          |
+| `pnpm start`              | Executa o build compilado                 |
+| `pnpm prisma migrate dev` | Aplica migrações do banco                 |
+| `pnpm prisma db seed`     | Popula o banco com dados iniciais         |
+| `pnpm gerar:dicionario`   | Gera `dicionario-tramites.xlsx` na raiz   |
+
+### Frontend (`frontend/`)
+
+| Script         | Descrição                                |
+| -------------- | ---------------------------------------- |
+| `pnpm dev`     | Servidor de desenvolvimento (hot reload) |
+| `pnpm build`   | Build de produção para`dist/`            |
+| `pnpm preview` | Serve o build de produção localmente     |
+
+## Como acessar
+
+1. Inicie o backend (porta `8000`).
+2. Inicie o frontend (porta `8443`).
+3. Acesse `http://localhost:8443` no navegador.
+4. Faça login com as credenciais do administrador.
+
+## Funcionalidades
+
+- **Autenticação JWT** em dois modos: **local** (bcrypt) e **Active Directory** (LDAP); o primeiro login AD cria o usuário e sincroniza suas unidades SEI
+- **Perfis com controle de acesso**: admin (tudo), analista (vê tudo) e assistente (apenas suas unidades)
+- **Cadastro de processos** via WebService SOAP do SEI (`consultarProcedimento`), com importação de vários números colados de uma vez
+- **Sincronização** individual e em lote (concorrência de 5), com cascata de unidades, detecção de conclusão e herança de status de processos pai
+- **Resumos executivos gerados por IA** (Google Gemini, com fallback de modelos) a partir de documentos (PDF, DOCX, ODT, planilhas, texto manual)
+- **Tags** para categorização e **anotações** por usuário (edição apenas do autor)
+- **Processos parados**: em andamento sem movimentação recente (exclui filhos anexados)
+- **Dashboard** com período configurável (padrão: últimos 6 meses), KPIs e gráficos (evolução, últimos processos, unidades, top tipos)
+- **Relatórios** com filtros, gráficos e exportação em **CSV, PDF e XLSX**
+- **Sugestão de encaminhamento**: descreva uma nova demanda (texto e/ou arquivos) e receba as unidades candidatas com pesos — k-NN com TF-IDF sobre os andamentos da base histórica + regra de domínio (devolução/reembolso → SECON)
+- **Dicionário de trâmites** (`pnpm gerar:dicionario` → `dicionario-tramites.xlsx`): unidades iniciais por situação, por setor e trâmites iniciais observados, para conferência com os setores
+- **Administração** (apenas admin): usuários, unidades por usuário e registros de sincronização
+
+## Notas
+
+- O WebService do SEI retorna **HTTP 500** para _SOAP faults_ (ex.: processo não encontrado); o backend converte isso em uma resposta de erro limpa.
+- A consulta ao SEI é permitida apenas por **número de processo individual**; não há endpoint de listagem no SEI.

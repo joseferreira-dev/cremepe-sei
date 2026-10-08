@@ -1,0 +1,163 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  passwordHash String    @default("") @map("password_hash")
+  role         String    @default("analista") // admin, analista, assistente
+  authSource   String    @default("local") @map("auth_source") // local ou ad
+  username     String    @unique // identificador de login (sAMAccountName para AD)
+  active       Boolean   @default(true)
+  unitsSyncedAt DateTime? @map("units_synced_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  annotations Annotation[]
+  units       UserUnit[]
+
+  @@map("users")
+}
+
+model UserUnit {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  unitId    String   @map("unit_id")
+  unitSigla String   @map("unit_sigla")
+  unitDesc  String   @default("") @map("unit_desc")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, unitId])
+  @@map("user_units")
+}
+
+model Process {
+  id                String    @id @default(uuid())
+  numeroSei         String    @unique @map("numero_sei")
+  tipo              String?
+  especificacao     String?
+  dataAutuacao      String?   @map("data_autuacao")
+  nivelAcesso       String?   @map("nivel_acesso")
+  linkSei           String?   @map("link_sei")
+  assuntos          String    @default("[]") // JSON array as string
+  interessados      String    @default("[]") // JSON array as string
+  unidadeAtual      String?   @map("unidade_atual") // JSON object as string
+  unidades          String    @default("[]") // JSON array of units as string
+  unidadeSincronizacao String? @map("unidade_sincronizacao") // JSON: units that successfully returned data on last sync
+  andamentos        String    @default("[]") // JSON array of andamentos (movements) as string
+  procedimentosRelacionados String @default("[]") @map("procedimentos_relacionados") // JSON array
+  procedimentosAnexados     String @default("[]") @map("procedimentos_anexados")     // JSON array
+  ultimoAndamento   String?   @map("ultimo_andamento") // JSON object as string
+  statusSistema     String    @default("em_analise") @map("status_sistema")
+  resumoIa          String?   @map("resumo_ia")
+  resumoGeradoEm    DateTime? @map("resumo_gerado_em")
+  sincronizadoEm    DateTime? @map("sincronizado_em")
+  // Texto dos campos pesquisáveis (numeroSei, especificacao, interessados,
+  // assuntos, resumoIa) normalizado: minúsculas, sem acentos. Mantida nos
+  // writes (services/busca.ts) e no backfill do boot — é o que a busca usa.
+  buscaNormalizada  String?   @map("busca_normalizada")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  annotations Annotation[]
+  tags        ProcessTag[]
+  syncLogs    SyncLog[]
+  resumoFonte ProcessResumoFonte?
+
+  @@map("processes")
+}
+
+// Texto que originou o resumo de IA (manual + arquivos). Fica em tabela própria
+// de propósito: não é coluna de processes, não trafega nas listagens/detalhes e
+// não participa de nenhuma busca (listagem, k-NN de encaminhamento, relatórios).
+model ProcessResumoFonte {
+  id        String   @id @default(uuid())
+  processId String   @unique @map("process_id")
+  texto     String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  process Process @relation(fields: [processId], references: [id], onDelete: Cascade)
+
+  @@map("process_resumo_fonte")
+}
+
+model Annotation {
+  id        String   @id @default(uuid())
+  processId String   @map("process_id")
+  userId    String   @map("user_id")
+  userName  String   @map("user_name")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  process Process @relation(fields: [processId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("annotations")
+}
+
+model Tag {
+  id        String       @id @default(uuid())
+  name      String       @unique
+  color     String
+  processes ProcessTag[]
+
+  @@map("tags")
+}
+
+model ProcessTag {
+  processId String @map("process_id")
+  tagId     String @map("tag_id")
+
+  process Process @relation(fields: [processId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([processId, tagId])
+  @@map("process_tags")
+}
+
+model SyncLog {
+  id        String    @id @default(uuid())
+  processId String?   @map("process_id")
+  numeroSei String?   @map("numero_sei")
+  userId    String?   @map("user_id")
+  tipo      String    // manual, batch
+  status    String    // success, error
+  mensagem  String
+  executedAt DateTime @default(now()) @map("executed_at")
+
+  process Process? @relation(fields: [processId], references: [id], onDelete: SetNull)
+
+  @@map("sync_logs")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  userName  String   @map("user_name")
+  acao      String
+  alvo      String
+  detalhe   String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}
+
+model Configuration {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("configurations")
+}

@@ -1,0 +1,35 @@
+node_modules/
+dist/
+build/
+.cache/
+.env*
+.vite/
+vite.config.*.timestamp-*
+*.tsbuildinfo
+*-debug.log*
+logs/
+*.log
+.claude-replay.*
+.tmp-*
+
+# Platform-managed agentplat state, not project source. In the
+# client-initiated single-repo workspace layout (make's `Path: "."` spec) the
+# repo root IS the workspace root, so these land inside this repo rather than
+# beside it.
+/.plugins/
+/.opencode-skills/
+
+# Backend
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/uploads/
+backend/prisma/dev.db
+backend/prisma/baseline.db
+backend/server.log
+backend/server.log.err
+
+# Sigiloso / gerado localmente (nunca versionar)
+dicionario-tramites.xlsx
+~$*
+resumos-*.txt

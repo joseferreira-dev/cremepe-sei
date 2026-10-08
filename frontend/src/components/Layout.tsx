@@ -1,0 +1,140 @@
+import { useNavigate, useLocation } from 'react-router-dom';
+import type { User } from '../types';
+import logoCremepe from '@/imports/logo-cremepe.png';
+
+interface NavItem {
+  path: string;
+  label: string;
+  icon: React.ReactNode;
+  roles?: string[];
+}
+
+const MenuIcon = ({ d }: { d: string }) => (
+  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+    <path strokeLinecap="round" strokeLinejoin="round" d={d} />
+  </svg>
+);
+
+const navItems: NavItem[] = [
+  { path: '/', label: 'Dashboard', icon: <MenuIcon d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /> },
+  { path: '/processos', label: 'Processos', icon: <MenuIcon d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /> },
+  { path: '/novo-processo', label: 'Cadastrar Processo', icon: <MenuIcon d="M12 4v16m8-8H4" /> },
+  { path: '/sugestao-encaminhamento', label: 'Encaminhar', icon: <MenuIcon d="M4 12h16m-6-6l6 6-6 6" /> },
+  { path: '/sincronizacao', label: 'Sincronização', icon: <MenuIcon d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /> },
+  { path: '/processos/sem-resumo', label: 'Sem Resumo', icon: <MenuIcon d="M7 3h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2zM12 9v4m0 3h.01" /> },
+  { path: '/parados', label: 'Processos Parados', icon: <MenuIcon d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /> },
+  { path: '/relatorios', label: 'Relatórios', icon: <MenuIcon d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /> },
+  { path: '/etiquetas', label: 'Tags', icon: <MenuIcon d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /> },
+  { path: '/administracao', label: 'Administração', icon: <MenuIcon d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />, roles: ['admin'] },
+  { path: '/perfil', label: 'Meu Perfil', icon: <MenuIcon d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /> },
+];
+
+const roleLabels: Record<string, string> = {
+  admin: 'Administrador',
+  assistente: 'Assistente',
+  analista: 'Analista',
+};
+
+interface Props {
+  user: User;
+  currentPage: string;
+  onLogout: () => void;
+  children: React.ReactNode;
+}
+
+export default function Layout({ user, currentPage, onLogout, children }: Props) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const visibleNav = navItems.filter(
+    (item) => !item.roles || item.roles.includes(user.role)
+  );
+
+  const isActive = (path: string) => {
+    if (path === '/') return location.pathname === '/';
+    return location.pathname === path;
+  };
+
+  return (
+    <div className="flex h-full" style={{ fontFamily: "'Inter', sans-serif" }}>
+      {/* Sidebar */}
+      <aside
+        className="flex flex-col shrink-0"
+        style={{
+          width: 240,
+          background: 'linear-gradient(180deg, #003D26 0%, #006B42 100%)',
+        }}
+      >
+        {/* Logo */}
+        <div className="flex items-center gap-3 px-4 py-5 border-b border-green-700">
+          <img src={logoCremepe} alt="CREMEPE" className="w-8 h-8 object-contain shrink-0" />
+          <div className="overflow-hidden">
+            <p className="text-white font-bold text-sm leading-tight" style={{ fontFamily: "'Outfit', sans-serif" }}>
+              CREMEPE SEI
+            </p>
+            <p className="text-green-400 text-xs">Gestão de Processos</p>
+          </div>
+        </div>
+
+        {/* Nav */}
+        <nav className="flex-1 py-4 space-y-0.5 px-2 overflow-y-auto">
+          {visibleNav.map((item) => {
+            const active = isActive(item.path);
+            return (
+              <a
+                key={item.path}
+                href={item.path}
+                onClick={(e) => { e.preventDefault(); navigate(item.path); }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                  active
+                    ? 'text-white'
+                    : 'text-green-300 hover:text-white hover:bg-white/10'
+                }`}
+                style={active ? { background: 'rgba(255,255,255,0.15)' } : {}}
+              >
+                <span className="shrink-0">{item.icon}</span>
+                <span className="truncate">{item.label}</span>
+                {active && (
+                  <span className="ml-auto w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#8DC63F' }} />
+                )}
+              </a>
+            );
+          })}
+        </nav>
+
+        {/* User */}
+        <div className="p-3 border-t border-green-700">
+          <button
+            onClick={() => navigate('/perfil')}
+            className="flex items-center gap-2 mb-2 w-full text-left hover:bg-white/10 rounded-lg px-1 py-1 transition-colors"
+          >
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+              style={{ background: '#8DC63F' }}
+            >
+              {user.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
+            </div>
+            <div className="overflow-hidden">
+              <p className="text-white text-xs font-medium truncate">{user.name.split(' ')[0]} {user.name.split(' ').slice(-1)[0]}</p>
+              <p className="text-green-400 text-xs">{roleLabels[user.role]}</p>
+            </div>
+          </button>
+          <button
+            onClick={onLogout}
+            className="w-full flex items-center gap-2 px-3 py-1.5 rounded text-green-400 hover:text-red-300 hover:bg-red-900/20 transition-all text-xs"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Sair
+          </button>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <main className="flex-1 overflow-auto bg-gray-50">
+        {children}
+      </main>
+    </div>
+  );
+}
