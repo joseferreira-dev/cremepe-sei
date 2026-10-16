@@ -53,7 +53,8 @@ Fontes de código:
 | --- | --- |
 | `backend/src/services/encaminhamento.ts` | algoritmo completo (rótulo, TF-IDF, cache, fallback, regras) |
 | `backend/src/routes/processes.ts:39` | rota `POST /sugestao-encaminhamento` |
-| `backend/scripts/avaliar-encaminhamento.ts` | avaliação sobre `PROCESSOS/` (`npm run avaliar:encaminhamento`) |
+| `backend/scripts/testar-encaminhamento.ts` | regressão das regras (`npm run testar:encaminhamento`) |
+| `backend/scripts/avaliar-divergencias.ts` | avaliação sobre as divergências rotuladas (`npm run avaliar:divergencias`) |
 | `backend/scripts/gerar-dicionario-tramites.ts` | gerador do dicionário Excel |
 | `frontend/src/components/RoutingSuggestion.tsx` | UI da sugestão (branch `metaTexto` para `regra`) |
 | `frontend/src/api.ts` | tipos (`estrategia` inclui `"regra"`, `motivoRegra`) |
@@ -140,7 +141,7 @@ A base não tem rótulo "destino correto"; ele é derivado do comportamento hist
 
    Efeito após o remapeamento: `PRESI/GABIN` 174→308, `COR/DEPRO` 59→155, `SEATE` 1391→1507, `SECOP` 151→196, `DEFIS` 275→295; nenhuma autoridade sobra como rótulo.
 
-5. **Setores com entrada única → nunca rótulo** (`ENTRADA_SETOR`): **todo processo antes de ir pro `COR/SESIND` passa pelo `COR/DEPRO`**, então o encaminhamento inicial (rótulo) é o DEPRO e `SESIND` some das sugestões. Confirmado na base: dos **243** processos com SESIND na trilha, **236** passam pelo DEPRO antes; nos 7 restantes SESIND vem precedida de CORREGEDOR/VICE-CORREGEDOR (que já mapeiam para DEPRO) ou chega por caminho externo, e **SESIND nunca é a 1ª unidade após o PROTOCOLO** (0 casos). Efeito: os **141** processos com rótulo SESIND passam a rotular `COR/DEPRO`; no conjunto de avaliação o caso `26.17.000005836-9` deixou de sugerir `COR/SESIND` e passou a `COR/DEPRO` (top-1 29→31/40, MRR 0,815→0,860, sem regressões).
+5. **Setores com entrada única → nunca rótulo** (`ENTRADA_SETOR`): **todo processo antes de ir pro `COR/SESIND` passa pelo `COR/DEPRO`**, então o encaminhamento inicial (rótulo) é o DEPRO e `SESIND` some das sugestões. Confirmado na base: dos **243** processos com SESIND na trilha, **236** passam pelo DEPRO antes; nos 7 restantes SESIND vem precedida de CORREGEDOR/VICE-CORREGEDOR (que já mapeiam para DEPRO) ou chega por caminho externo, e **SESIND nunca é a 1ª unidade após o PROTOCOLO** (0 casos). Efeito: os **141** processos com rótulo SESIND passam a rotular `COR/DEPRO`; o caso `26.17.000005836-9` deixou de sugerir `COR/SESIND` e passou a `COR/DEPRO` (sem regressões).
 
 Por que permanência e não "primeira unidade" nem "última unidade":
 
@@ -241,12 +242,12 @@ sinal no header pós-protocolo; em e-mails o assunto já costuma estar nos dois.
 
 **Regras** (`REGRAS_CONTEUDO`, checadas em ordem; `h` = cabeçalho da regra, `b` = texto inteiro):
 
-| # | Destino | Padrão | Evidência (47 casos) |
+| # | Destino | Padrão | Evidência |
 | --- | --- | --- | --- |
 | 1 | `PRESI/GABIN` | `h` combinado: mandado de segurança, `pje.cloud`, processo judicial eletrônico, inquérito civil, polícia federal/policia civil/delegacia, `ofício n`, `pr-pe-\d`, convite, "encaminha expediente", estelionato, falsidade ideológica/falsificação, **"tramitar para o gabin"**, **"gabinete gabin"/`diretoria@`** (e-mail da diretoria), **conselhos regionais (`simepe|cremesp`) e circulares (`circular n`)**, **Forças Armadas (`mil.br|marinha|exercito`)**, inquérito policial | — |
-| 2 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `h` combinado: `denuncia`, notícia de fato, averiguação, sindicância, verificação cadastral, procedimento preparatório — **todo trâmite desses casos começa pelo gabinete** (ciência da diretoria/presidência) e só depois segue ao setor de processos | pendente (§10) |
-| 3 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `h` combinado: `ministerio publico` ou `mppe` (notificação/procedimento do MPE) | pendente (§10) |
-| 4 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `b`: "denuncia encaminhada pelo portal do cremepe" (fallback — o cabeçalho costuma já casar na regra 2) | pendente (§10) |
+| 2 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `h` combinado: `denuncia`, notícia de fato, averiguação, sindicância, verificação cadastral, procedimento preparatório — **todo trâmite desses casos começa pelo gabinete** (ciência da diretoria/presidência) e só depois segue ao setor de processos | base (`5394-4`) + sintéticos |
+| 3 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `h` combinado: `ministerio publico` ou `mppe` (notificação/procedimento do MPE) | `4590-9` + sintéticos |
+| 4 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `b`: "denuncia encaminhada pelo portal do cremepe" (fallback — o cabeçalho costuma já casar na regra 2) | sintéticos |
 | 5 | `VIP/CP/CEM` | `h`: comitê/comissão de ética (eleição/convoqução) | 2 casos (`5515-7`, `5217-4`) |
 | 6 | `SECRET. G./SEBIB` | `h`: `parecer`, `consulta`, **cessão temporária de útero / gestação por substituição / procriação assistida** (Res. CFM 2.320/2022) | 6/6 + `5441-0` |
 | 7 | `SECRET. G./SEATE` | `h`: carteira CIM, carteira do médico, **Cadastro Nacional da Pessoa Jurídica / comprovante de inscrição e situação cadastral** | 1/1 + `5410-0` |
@@ -271,9 +272,8 @@ reembolso (seção 7) por último** — se os dois dispararem no mesmo texto, o 
 **Erros conhecidos / fora de escopo**:
 
 - `26.17.000005681-1` — assédio com boletim de ocorrência: com a regra antiga a
-  divergência era GABIN × DEPRO (único erro das 34 disparos: 97%); desde 07/10 **toda**
-  denúncia manda `PRESI/GABIN` com `COR/DEPRO` em 2º e o caso passa a ser esperado como
-  GABIN (atualizar o rótulo na planilha — ver §10).
+  divergência era GABIN × DEPRO; desde 07/10 **toda** denúncia manda `PRESI/GABIN` com
+  `COR/DEPRO` em 2º e o caso passa a ser esperado como GABIN.
 - Padrões de **1 caso** só entram com termo altamente específico e semântica defensável
   (decisão de 15/10/2026): "cessão temporária de útero → SEBIB" e "CNPJ/cadastro → SEATE"
   foram incluídos; "análise ética → SEATE", "falecimento → 3 destinos" seguem fora
@@ -307,31 +307,16 @@ Números da base atual: 31 unidades iniciais; ~93% dos processos com descrição
 
 ## 10. Avaliação (resultados observados)
 
-**Conjunto rotulado** — `PROCESSOS/`: casos `.txt` + `ENCAMINHAMENTOS.xlsx` (aba `Planilha2`,
-colunas nº / Sugestão / **Correto**). Rode `npm run avaliar:encaminhamento` (ver §13).
+**Metodologia (15/10/2026)** — a avaliação usa **apenas processos cadastrados na base
+local com fonte textual** (`process_resumo_fonte`). Não existe pasta de casos externa:
+os comandos de regressão estão no §13 (`npm run testar:encaminhamento` e
+`npm run avaliar:divergencias`).
 
-> Hoje a pasta tem **40 dos 47** casos (7 `.txt` ausentes: `5857-1`, `5858-0`, `5872-5`,
-> `5848-2`, `5824-5`, `5825-3`, `5827-0` — o script avisa e pula). Métricas atuais:
-
-> **Pendência (07/10/2026)** — as métricas abaixo são **anteriores** à mudança "denúncia
-> passa primeiro pelo GABIN" (regras 2–4 com `COR/DEPRO` garantido em 2º). Enquanto a
-> pasta `PROCESSOS/` não voltar com os rótulos de denúncia atualizados para
-> `PRESI/GABIN`, os ~10 casos de denúncia contarão como erro no top-1 (~22/40) mesmo com
-> a sugestão correta; **reExecute o gate após a atualização da planilha**.
-
-| Métrica | Valor (40 casos) |
-| --- | --- |
-| top-1 | **31/40 (78%)** |
-| top-3 / top-5 | 38 / 39 |
-| MRR | **0,860** |
-| regras de conteúdo | 30 disparos, **29 corretos (97%)** |
-| LOO (400 processos, sem regras) | 79,5% top-1 |
-
-Por regra: GABIN 14/15, DEPRO 9/9, SEBIB 4/4, SEATE 1/1, SERECRED 1/1.
-Com os 47 casos (medição anterior, antes do remapeamento SESIND→DEPRO): top-1 **34/47**,
-MRR 0,821; nos mesmos 40 casos o SESIND→DEPRO levou **29→31** top-1 e **0,815→0,860** MRR
-(sem regressão em nenhum caso — todos os casos alterados eram de DEPRO).
-Sem as regras de conteúdo (só k-NN, medição com 47): **5/47 (11%)** top-1, MRR 0,394.
+> **Observação histórica** — medições antigas sobre um conjunto rotulado externo de 47
+> casos (não mais usado): LOO sobre 400 processos da base, sem regras, = **79,5% top-1**;
+> com o conjunto, as regras de conteúdo atingiam 97% de precisão (30 disparos, 29
+> corretos) e o top-1 era 31/40 (78%), MRR 0,860; só k-NN sem regras: 5/47 (11%),
+> MRR 0,394.
 
 Casos observados:
 
@@ -349,13 +334,14 @@ Casos observados:
 | texto sem termos de contexto | `nenhuma` (interface: "sem sugestão") |
 | requisição vazia | `400` |
 
-**Conjunto de divergências — `processos.xlsx` (raiz, aba `Planilha3`, 29 casos)** (15/10/2026):
-casos em que a sugestão divergiu do setor "Correto" (22 deles = `PRESI/GABIN`). Como o
-arquivo não pode ir para o Git (não há `.xlsx` de dados versionado), a validação local é:
+**Conjunto de divergências — `processos.xlsx` (raiz, local, não versionado; aba
+`Planilha3`, 29 casos, colunas Listagem / Sugestão / Correto)**: casos em que a sugestão
+divergiu do setor "Correto" (22 deles = `PRESI/GABIN`). Avalia a **fonte textual** de
+cada processo cadastrado na base:
 
 ```bash
 cd backend
-npx tsx "%TEMP%\opencode\analisa-processos.mts"   # imprime linha a linha e o total
+npm run avaliar:divergencias    # imprime linha a linha e o total (esperado ≥ 24/29)
 ```
 
 | Momento | Resultado nos 29 |
@@ -446,19 +432,16 @@ curl -s -X POST "http://localhost:8000/api/processos/sugestao-encaminhamento" \
 
 Verificar: `estrategia` esperada (`regra` + `motivoRegra: "reembolso"` no caso acima), topo `CREMEPE/TESOURARIA/SECON`, exemplos com trâmites coerentes.
 
-**Avaliação sobre os 47 casos rotulados** (heurística principal — rode antes e depois de
-qualquer mudança no algoritmo):
+**Regressão automatizada** (rodar do `backend/`; exige a base local com fontes textuais — rode antes e depois de qualquer mudança no algoritmo):
 
 ```bash
-cd backend
-npm run avaliar:encaminhamento                # top-1/3/5, MRR, precisão por regra
-npm run avaliar:encaminhamento -- --detalhe   # linha a linha
-npm run avaliar:encaminhamento -- --min=31    # exit 1 se top-1 < 31 (checagem de regressão)
+npm run testar:encaminhamento   # regras: denúncias reais da base + sintéticos (16 checks)
+npm run avaliar:divergencias    # conjunto de divergências (processos.xlsx): ≥ 24/29
 ```
 
-Referência atual (40 casos disponíveis): **top-1 31/40, MRR 0,860, regras 29/30 corretas (97%)**
-(métricas anteriores à mudança das regras 2–4 — ver pendência da §10).
-Se os 7 `.txt` ausentes voltarem, espere ~36/47 e suba o `--min` para 36.
+Com a API no ar, a regressão de rota (login, listagem, sugestão) fica por conta do
+script manual `%TEMP%\opencode\regressao_api.cjs` (`BASE_URL=http://127.0.0.1:8000`),
+que não é versionado.
 
 Checagens de regressão recomendadas após qualquer mudança:
 
@@ -474,11 +457,3 @@ Checagens de regressão recomendadas após qualquer mudança:
 - "ressarcimento" avulso (cancelamento de inscrição) → **sem** regra de reembolso (k-NN/SEATE intacto);
 - comitê/comissão de ética → **VIP/CP/CEM**; "exclusão de débito" → **TESOURARIA/SECON**; CNPJ/cadastro → **SEATE**; "cessão temporária de útero" → **SEBIB**;
 - `npx tsc --noEmit` (backend) e `cd frontend && npx tsc --noEmit && npm run build`.
-
-Scripts de regressão (rodar do `backend/`, exigem a base local):
-
-```bash
-npx tsx "%TEMP%\opencode\testa-denuncia-gabin.mts"   # regras sintéticas + denúncias reais (16 checks)
-npx tsx "%TEMP%\opencode\analisa-processos.mts"      # planilha dos 29 divergentes (≥24/29)
-node "%TEMP%\opencode\regressao_api.cjs"             # API no ar (BASE_URL=http://127.0.0.1:8000)
-```

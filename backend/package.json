@@ -12,7 +12,8 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:studio": "prisma studio",
     "gerar:dicionario": "tsx scripts/gerar-dicionario-tramites.ts",
-    "avaliar:encaminhamento": "tsx scripts/avaliar-encaminhamento.ts"
+    "testar:encaminhamento": "tsx scripts/testar-encaminhamento.ts",
+    "avaliar:divergencias": "tsx scripts/avaliar-divergencias.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
