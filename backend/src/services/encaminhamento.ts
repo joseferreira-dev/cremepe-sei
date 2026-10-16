@@ -509,7 +509,7 @@ const REGRAS_CONTEUDO: RegraConteudo[] = [
     sigla: "CREMEPE/PRESI/GABIN",
     combinado: true,
     testa: (h) =>
-      /mandado de seguran|pje\.cloud|processo judicial eletronico|pjdpp|inquerito civil|policia federal|pf\.gov\.br|oficio n|pr-pe-\d|convite para conferencia|encaminha expediente|estelionato|falsidade ideologica|falsificac|tramitar para o gabin|gabinete gabin|diretoria@|simepe|cremesp|circular n|mil\.br|marinha|exercito|inquerito policial|policia civil|nao dobra|nao dobrar/.test(h),
+      /mandado de seguran|pje\.cloud|processo judicial eletronico|pjdpp|inquerito civil|policia federal|pf\.gov\.br|oficio n|pr-pe-\d|convite para conferencia|encaminha expediente|estelionato|\broubo\b|\bfurto\b|falsidade ideologica|falsificac|tramitar para o gabin|gabinete gabin|diretoria@|simepe|cremesp|circular n|mil\.br|marinha|exercito|inquerito policial|policia civil|nao dobra|nao dobrar/.test(h),
   },
   // Denúncia / notícia de fato / averiguação etc.: passam PRIMEIRO pelo
   // gabinete (ciência da diretoria/presidência) e só depois seguem ao

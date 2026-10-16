@@ -171,6 +171,15 @@ const EMAIL = (assunto: string, corpo: string) =>
   );
   ok(r.top === "CREMEPE/PRESI/GABIN", "não dobra de plantão -> GABIN", r.top);
 }
+{
+  const r = await top(
+    EMAIL(
+      "Re: Roubo de CARIMBO DE Dra Débora Rufino",
+      "Segue em anexo o boletim de ocorrência.",
+    ),
+  );
+  ok(r.top === "CREMEPE/PRESI/GABIN", "roubo de carimbo (boletim) -> GABIN", r.top);
+}
 
 // ---- Negativos: gate, ressarc e falso positivo interno ----
 {
