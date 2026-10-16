@@ -75,6 +75,22 @@ for (const num of DENUNCIAS) {
   );
 }
 
+// ---- Dobra de plantão (fontes reais): GABIN ----
+const NAO_DOBRA = ["26.17.000005279-4", "26.17.000005297-2"];
+for (const num of NAO_DOBRA) {
+  const t = fonte(num);
+  if (!t) {
+    console.log(`SKIP nao-dobra ${num} (ausente na base local)`);
+    continue;
+  }
+  const r = await top(t);
+  ok(
+    r.top === "CREMEPE/PRESI/GABIN" && r.motivo === "conteudo",
+    `nao-dobra ${num} -> GABIN`,
+    `${r.top} (${r.estrategia}/${r.motivo})`,
+  );
+}
+
 // ---- Sintéticos: uma regra por caso (gate sempre verdadeiro: e-mail estruturado) ----
 const EMAIL = (assunto: string, corpo: string) =>
   `Setor de Protocolo e Arquivo SEPROA <protocolo@cremepe.org.br>\n${assunto}\n1 mensagem\nJoao Silva\nPara: "protocolo@cremepe.org.br" <protocolo@cremepe.org.br>\n\n${corpo}`;
@@ -145,6 +161,15 @@ const EMAIL = (assunto: string, corpo: string) =>
 {
   const r = await top(EMAIL("TRAMITAR PARA O GABIN", "Seguem documentos para ciência da diretoria."));
   ok(r.top === "CREMEPE/PRESI/GABIN", "tramitar para o GABIN -> GABIN", r.top);
+}
+{
+  const r = await top(
+    EMAIL(
+      "Declaração de não dobra",
+      "Segue em anexo declaração para não dobrar plantão no Hospital X.",
+    ),
+  );
+  ok(r.top === "CREMEPE/PRESI/GABIN", "não dobra de plantão -> GABIN", r.top);
 }
 
 // ---- Negativos: gate, ressarc e falso positivo interno ----

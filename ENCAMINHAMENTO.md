@@ -244,7 +244,7 @@ sinal no header pós-protocolo; em e-mails o assunto já costuma estar nos dois.
 
 | # | Destino | Padrão | Evidência |
 | --- | --- | --- | --- |
-| 1 | `PRESI/GABIN` | `h` combinado: mandado de segurança, `pje.cloud`, processo judicial eletrônico, inquérito civil, polícia federal/policia civil, `ofício n`, `pr-pe-\d`, convite, "encaminha expediente", estelionato, falsidade ideológica/falsificação, **"tramitar para o gabin"**, **"gabinete gabin"/`diretoria@`** (e-mail da diretoria), **conselhos regionais (`simepe|cremesp`) e circulares (`circular n`)**, **Forças Armadas (`mil.br|marinha|exercito`)**, inquérito policial (**atenção**: "Delegacia Regional" é unidade interna do CREMEPE e **não** deve casar — regressão do `5295-6`; usar `policia civil`, nunca `delegacia` sozinho) | — |
+| 1 | `PRESI/GABIN` | `h` combinado: mandado de segurança, `pje.cloud`, processo judicial eletrônico, inquérito civil, polícia federal/policia civil, `ofício n`, `pr-pe-\d`, convite, "encaminha expediente", estelionato, falsidade ideológica/falsificação, **"tramitar para o gabin"**, **"gabinete gabin"/`diretoria@`** (e-mail da diretoria), **conselhos regionais (`simepe|cremesp`) e circulares (`circular n`)**, **Forças Armadas (`mil.br|marinha|exercito`)**, inquérito policial, **"não dobra"/"não dobrar" (plantão)** (`5279-4`, `5297-2`) (**atenção**: "Delegacia Regional" é unidade interna do CREMEPE e **não** deve casar — regressão do `5295-6`; usar `policia civil`, nunca `delegacia` sozinho) | — |
 | 2 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `h` combinado: `denuncia`, notícia de fato, averiguação, sindicância, verificação cadastral, procedimento preparatório — **todo trâmite desses casos começa pelo gabinete** (ciência da diretoria/presidência) e só depois segue ao setor de processos | base (`5394-4`) + sintéticos |
 | 3 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `h` combinado: `ministerio publico` ou `mppe` (notificação/procedimento do MPE) | `4590-9` + sintéticos |
 | 4 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `b`: "denuncia encaminhada pelo portal do cremepe" (fallback — o cabeçalho costuma já casar na regra 2) | sintéticos |
@@ -435,7 +435,7 @@ Verificar: `estrategia` esperada (`regra` + `motivoRegra: "reembolso"` no caso a
 **Regressão automatizada** (rodar do `backend/`; exige a base local com fontes textuais — rode antes e depois de qualquer mudança no algoritmo):
 
 ```bash
-npm run testar:encaminhamento   # regras: denúncias reais da base + sintéticos (17 checks)
+npm run testar:encaminhamento   # regras: denúncias/não-dobra reais da base + sintéticos (19 checks)
 npm run avaliar:divergencias    # conjunto de divergências (processos.xlsx): ≥ 24/29
 ```
 
