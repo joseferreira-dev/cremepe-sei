@@ -13,6 +13,7 @@ import {
   sugerirEncaminhamento,
   aplicarRegraReembolso,
   eReembolso,
+  regraDeConteudo,
 } from "../src/services/encaminhamento.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -146,7 +147,7 @@ const EMAIL = (assunto: string, corpo: string) =>
   ok(r.top === "CREMEPE/PRESI/GABIN", "tramitar para o GABIN -> GABIN", r.top);
 }
 
-// ---- Negativos: gate e ressarc ----
+// ---- Negativos: gate, ressarc e falso positivo interno ----
 {
   const r = await top("Pedido de carteira");
   ok(r.estrategia !== "regra" || r.motivo !== "conteudo", "descrição curta não dispara regra", `${r.estrategia}/${r.motivo}`);
@@ -154,6 +155,20 @@ const EMAIL = (assunto: string, corpo: string) =>
 {
   const r = eReembolso("solicito o ressarcimento proporcional dos valores já pagos pela empresa");
   ok(r === false, "ressarcimento avulso NÃO é reembolso", String(r));
+}
+{
+  // "Delegacia Regional" é unidade INTERNA do CREMEPE — não pode casar a regra
+  // de expediente externo (regressão do 26.17.000005295-6).
+  const r = regraDeConteudo(
+    EMAIL(
+      "CIM/CPM - 0041722 - PE LAURA ALMEIDA SOUZA DE OLIVEIRA",
+      "Olá! Solicito o envio da doc de:\n0041722 - PE LAURA ALMEIDA SOUZA DE OLIVEIRA",
+    ).replace(
+      "Joao Silva",
+      "Delegacia Regional Caruaru <regionalcaruaru@cremepe.org.br>",
+    ),
+  );
+  ok(r !== "CREMEPE/PRESI/GABIN", "Delegacia Regional (unidade interna) NÃO dispara GABIN", String(r));
 }
 
 console.log(`\n${pass}/${pass + fail} testes passaram`);
