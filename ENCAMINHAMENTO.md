@@ -44,8 +44,9 @@ texto + arquivos ──► extrairTexto ──► textoCompleto
                               motivoRegra?: "conteudo" | "reembolso")
 ```
 
-> Quando o k-NN **já** elegeu o destino da regra, o resultado é devolvido intacto
-> (`estrategia` segue `"vizinhos"`): a regra só muda a ordem quando precisa.
+> Quando o k-NN **já** elegeu o destino da regra, os pesos ficam intactos, mas a
+> metadata continua `estrategia: "regra"` / `motivoRegra` da regra que casou —
+> ela vale como garantia mesmo com o k-NN concordante.
 
 Fontes de código:
 
@@ -257,8 +258,10 @@ sinal no header pós-protocolo; em e-mails o assunto já costuma estar nos dois.
 **Aplicação** (`aplicarRegraDominio` → `elevarParaTopo`, o mesmo helper da regra 7):
 a sugestão da regra vai para o topo (`max(outros) + 0,02`, teto 0,95) e o resto é
 renormalizado — o k-NN continua visível como 2ª..6ª opção com `estrategia: "regra"` e
-`motivoRegra: "conteudo"`. Se o k-NN **já** tinha esse destino no topo, o resultado volta
-intacto (`estrategia: "vizinhos"`). Funciona mesmo sem vizinhos (base vazia ou consulta
+`motivoRegra: "conteudo"`. Se o k-NN **já** tinha esse destino no topo, os pesos
+ficam intactos, mas a metadata segue como `estrategia: "regra"` / `motivoRegra:
+"conteudo"` (a regra casou — a UI exibe o selo de regra mesmo com o k-NN
+concordante). Funciona mesmo sem vizinhos (base vazia ou consulta
 fora do vocabulário).
 
 Regras com **2ª garantida** (campo `segunda`, regras 2–4): `COR/DEPRO` é injetado logo

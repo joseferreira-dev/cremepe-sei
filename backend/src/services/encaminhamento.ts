@@ -590,7 +590,9 @@ function sugestaoDeDestino(base: BaseCache, sigla: string, preferidos?: DocBase[
 /**
  * Coloca a sugestão da regra no topo e mantém o aprendido como alternativa
  * (regra = garantia de destino, k-NN = evidência) — mesma reponderação usada
- * pela regra de reembolso. Se o k-NN já a elegeu, devolve o resultado intacto.
+ * pela regra de reembolso. Se o k-NN já a elegeu, os pesos ficam intactos, mas
+ * a metadata (`estrategia`/`motivoRegra`) continua registrando a regra — ela
+ * casou e vale como garantia, mesmo com o k-NN concordante.
  * Com `segunda`, esse destino fica garantido na posição 2 (trâmite de passagem:
  * ex. denúncia → GABIN → DEPRO), mesmo que o k-NN não o tenha votado.
  */
@@ -621,7 +623,7 @@ function elevarParaTopo(
   const atual = resultado.sugestoes.find((s) => s.sigla === alvo.sigla);
   const soma = resultado.sugestoes.reduce((a, s) => a + s.peso, 0) || 1;
   const maxOutro = Math.max(0, ...resultado.sugestoes.filter((s) => s.sigla !== alvo.sigla).map((s) => s.peso));
-  if (atual && atual.peso >= maxOutro) return injeta(resultado);
+  if (atual && atual.peso >= maxOutro) return injeta({ ...resultado, estrategia: "regra", motivoRegra: motivo });
 
   const alvoPeso = r3(Math.min(maxOutro + 0.02, 0.95));
   const resto = soma - (atual ? atual.peso : 0);

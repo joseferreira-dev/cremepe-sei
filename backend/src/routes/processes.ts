@@ -152,13 +152,24 @@ async function permissaoDeAcesso(userId: string, process: ProcessoAcesso) {
   return { userRole, userUnitSiglas, acesso: verificarAcessoProcesso(process, userRole, userUnitSiglas) };
 }
 
-/** Unidades pelas quais o processo passou, derivadas dos andamentos. Usadas quando o processo não tem unidades abertas (ex.: finalizado). */
+/**
+ * Unidades pelas quais o processo passou, derivadas dos andamentos. Usadas quando o processo não tem unidades abertas (ex.: finalizado ou anexado).
+ * Aceita tanto o formato bruto do SEI (`{ Unidade: { IdUnidade, Sigla, Descricao } }`)
+ * quanto o formato armazenado em `processes.andamentos` (`{ unidade: sigla }`).
+ */
 function unidadesDeHistorico(andamentos: any[]): { id: string; sigla: string; descricao: string }[] {
   const mapa = new Map<string, { id: string; sigla: string; descricao: string }>();
   for (const a of andamentos) {
     const un = a?.Unidade;
-    if (un?.IdUnidade && !mapa.has(un.IdUnidade)) {
-      mapa.set(un.IdUnidade, { id: un.IdUnidade, sigla: un.Sigla || "", descricao: un.Descricao || "" });
+    if (un?.IdUnidade) {
+      if (!mapa.has(un.IdUnidade)) {
+        mapa.set(un.IdUnidade, { id: un.IdUnidade, sigla: un.Sigla || "", descricao: un.Descricao || "" });
+      }
+      continue;
+    }
+    const sigla = typeof a?.unidade === "string" ? a.unidade.trim() : "";
+    if (sigla && !mapa.has(sigla)) {
+      mapa.set(sigla, { id: "", sigla, descricao: "" });
     }
   }
   return Array.from(mapa.values());
@@ -213,6 +224,11 @@ async function syncProcesso(procId: string): Promise<SyncResult> {
     usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "",
   }));
   const ultimoAndSync = andamentosSyncParsed.length > 0 ? andamentosSyncParsed[0] : null;
+
+  // Andamentos finais: os buscados agora, senão os já acumulados no banco.
+  // O fallback de `unidades` precisa deles — sem isso, syncs sem fetch novo
+  // sobrescreviam `unidades` com [] (caso dos processos anexados).
+  const andamentosFinais: any[] = andamentosSync.length > 0 ? andamentosSync : JSON.parse(proc.andamentos || "[]");
 
   const relatedNumeros = (seiData.ProcedimentosRelacionados || []).map((p) => p.ProcedimentoFormatado);
   const anexadosNumeros = (seiData.ProcedimentosAnexados || []).map((p) => p.ProcedimentoFormatado);
@@ -279,7 +295,7 @@ async function syncProcesso(procId: string): Promise<SyncResult> {
           ? "em_andamento"
           : proc.statusSistema === "finalizado" ? "finalizado" : "em_andamento",
       unidadeAtual: seiData.UnidadeAtual ? JSON.stringify({ id: seiData.UnidadeAtual.IdUnidade, sigla: seiData.UnidadeAtual.Sigla, descricao: seiData.UnidadeAtual.Descricao }) : proc.unidadeAtual,
-      unidades: JSON.stringify(unidadesReais.length > 0 ? unidadesReais : unidadesDeHistorico(andamentosSync)),
+      unidades: JSON.stringify(unidadesReais.length > 0 ? unidadesReais : unidadesDeHistorico(andamentosFinais)),
       andamentos: andamentosSync.length > 0
         ? JSON.stringify(andamentosSync.map((a) => ({ id: a.IdAndamento, descricao: a.Descricao, dataHora: a.DataHora, usuario: a.Usuario?.Nome || "", unidade: a.Unidade?.Sigla || "" })))
         : proc.andamentos,
