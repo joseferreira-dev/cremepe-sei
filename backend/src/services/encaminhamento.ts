@@ -462,7 +462,7 @@ function ehDocumentoEstruturado(texto: string): boolean {
   if (linhas.some((l) => /protocolo/i.test(l) && /@/.test(l))) return true;
   if (linhas.slice(0, 8).some((l) => /^(de|date|subject|assunto|from|to|para|enviado):/i.test(l))) return true;
   if (/forwarded message/i.test(texto)) return true;
-  return /of[ií]cio|tribunal|min[ií]sterio p[uú]blico|poder judici[aá]rio|pje|procuradoria|comarca|vara c[ií]vel|prefeitura|conselho federal|carta testemunhal/i.test(topo);
+  return /of[ií]cio|tribunal|min[ií]sterio p[uú]blico|poder judici[aá]rio|pje|procuradoria|comarca|vara c[ií]vel|prefeitura|conselho federal|carta testemunhal|pol[ií]cia civil|governo do estado|secretaria de defesa social|cadastro nacional da pessoa jur[ií]dica/i.test(topo);
 }
 
 function cabecalhoDoTexto(texto: string): string {
@@ -472,6 +472,22 @@ function cabecalhoDoTexto(texto: string): string {
   return linhas.slice(ini, ini + 5).join(" ");
 }
 
+/**
+ * Header combinado (regras da família GABIN): as 5 primeiras linhas do
+ * documento somadas às 5 linhas após a linha de protocolo. Em formulários
+ * (ex.: DENUNCIANTE) a linha de protocolo vem depois do topo e esconderia
+ * o sinal no header pós-protocolo; em e-mails o assunto já costuma estar
+ * nos dois, então a combinação só soma contexto.
+ */
+function cabecalhoCombinado(texto: string): string {
+  const linhas = (texto || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const i0 = linhas.findIndex((l) => /protocolo/i.test(l) && /@/.test(l));
+  const ini = i0 >= 0 ? i0 + 1 : 0;
+  const pos = linhas.slice(ini, ini + 5).join(" ");
+  if (ini === 0) return pos;
+  return `${linhas.slice(0, 5).join(" ")} ${pos}`;
+}
+
 const semAcento = (s: string) =>
   s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ");
 
@@ -479,15 +495,21 @@ interface RegraConteudo {
   sigla: string;
   /** Destino garantido logo abaixo (trâmite de passagem: ex. GABIN → DEPRO). */
   segunda?: string;
+  /** Testa o header combinado (topo + pós-protocolo) em vez do pós-protocolo. */
+  combinado?: boolean;
   testa: (cabecalho: string, corpo: string) => boolean;
 }
 
 const REGRAS_CONTEUDO: RegraConteudo[] = [
-  // Expediente externo/judicial/policial (ofícios, PJe, mandado, MP, PF...)
+  // Expediente externo/judicial/policial (ofícios, PJe, mandado, MP, PF...) e
+  // instruções diretas ao gabinete ("tramitar para o GABIN", "Gabinete GABIN
+  // <diretoria@cremepe>", ofícios de conselhos regionais/federais, Forças
+  // Armadas, Polícia Civil, circulares).
   {
     sigla: "CREMEPE/PRESI/GABIN",
+    combinado: true,
     testa: (h) =>
-      /mandado de seguran|pje\.cloud|processo judicial eletronico|pjdpp|inquerito civil|policia federal|pf\.gov\.br|oficio n|pr-pe-\d|convite para conferencia|encaminha expediente|estelionato|falsidade ideologica/.test(h),
+      /mandado de seguran|pje\.cloud|processo judicial eletronico|pjdpp|inquerito civil|policia federal|pf\.gov\.br|oficio n|pr-pe-\d|convite para conferencia|encaminha expediente|estelionato|falsidade ideologica|falsificac|tramitar para o gabin|gabinete gabin|diretoria@|simepe|cremesp|circular n|mil\.br|marinha|exercito|inquerito policial|policia civil|delegacia/.test(h),
   },
   // Denúncia / notícia de fato / averiguação etc.: passam PRIMEIRO pelo
   // gabinete (ciência da diretoria/presidência) e só depois seguem ao
@@ -495,6 +517,7 @@ const REGRAS_CONTEUDO: RegraConteudo[] = [
   {
     sigla: "CREMEPE/PRESI/GABIN",
     segunda: "CREMEPE/COR/DEPRO",
+    combinado: true,
     testa: (h) =>
       /\bdenuncia|\bnoticia de fato|\baveriguacao|\bsindicanc|\bverificacao cadastral|\bprocedimento preparatorio/.test(h),
   },
@@ -502,7 +525,8 @@ const REGRAS_CONTEUDO: RegraConteudo[] = [
   {
     sigla: "CREMEPE/PRESI/GABIN",
     segunda: "CREMEPE/COR/DEPRO",
-    testa: (h) => /ministerio publico/.test(h),
+    combinado: true,
+    testa: (h) => /ministerio publico|\bmppe\b/.test(h),
   },
   // Denúncia pelo portal (cabeçalho raramente não traz "denúncia"; fallback)
   {
@@ -510,18 +534,33 @@ const REGRAS_CONTEUDO: RegraConteudo[] = [
     segunda: "CREMEPE/COR/DEPRO",
     testa: (_h, b) => /denuncia encaminhada pelo portal do cremepe/.test(b),
   },
-  // Parecer/consulta → biblioteca e documentação
-  { sigla: "CREMEPE/SECRET. G./SEBIB", testa: (h) => /\bparecer\b|\bconsulta\b/.test(h) },
-  { sigla: "CREMEPE/SECRET. G./SEATE", testa: (h) => /carteira cim|carteira do medico/.test(h) },
+  // Comitê/Comissão de Ética Médica → CP/CEM
+  { sigla: "CREMEPE/VIP/CP/CEM", testa: (h) => /comite de etica|comissao de etica/.test(h) },
+  // Parecer/consulta → biblioteca e documentação (SEBIB); bioética assistida
+  // (cessão temporária de útero — Res. CFM 2.320/2022) também é da SEBIB.
+  {
+    sigla: "CREMEPE/SECRET. G./SEBIB",
+    testa: (h) =>
+      /\bparecer\b|\bconsulta\b|cessao temporaria de utero|gestacao por substituicao|procriacao assistida/.test(h),
+  },
+  {
+    sigla: "CREMEPE/SECRET. G./SEATE",
+    testa: (h) =>
+      /carteira cim|carteira do medico|cadastro nacional da pessoa juridica|comprovante de inscricao e de situacao cadastral/.test(h),
+  },
   { sigla: "CREMEPE/TESOURARIA/SERECRED", testa: (h) => /pagamento duplo|gravidade de anuidade/.test(h) },
-  { sigla: "CREMEPE/TESOURARIA/SECON", testa: (h) => /retirada de debito|\b2a via\b|segunda via/.test(h) },
+  {
+    sigla: "CREMEPE/TESOURARIA/SECON",
+    testa: (h) => /retirada de debito|\b2a via\b|segunda via|exclusao de debito|exclusao de divida/.test(h),
+  },
 ];
 
 function regraCompletaDeConteudo(texto: string): RegraConteudo | null {
   if (!ehDocumentoEstruturado(texto)) return null;
   const h = semAcento(cabecalhoDoTexto(texto));
+  const hc = semAcento(cabecalhoCombinado(texto));
   const b = semAcento(texto);
-  for (const r of REGRAS_CONTEUDO) if (r.testa(h, b)) return r;
+  for (const r of REGRAS_CONTEUDO) if (r.testa(r.combinado ? hc : h, b)) return r;
   return null;
 }
 
@@ -612,7 +651,10 @@ export async function aplicarRegraDominio(resultado: ResultadoSugestao, texto: s
  * SEATE faz só os trâmites com o cidadão. A permanência jamais elege o SECON
  * (permanência ~0,1d), então o destino é garantido por conteúdo do texto.
  */
-const PREFIXOS_REEMBOLSO = ["reembol", "restitu", "estorn", "ressarc"];
+// "ressarc*" ficou de fora: aparece em pedidos de cancelamento de inscrição
+// (ressarcimento proporcional de valores já pagos) cujo destino correto é o
+// SEATE — quem quer SECON usa "reembolso/restituição/estorno" explícitos.
+const PREFIXOS_REEMBOLSO = ["reembol", "restitu", "estorn"];
 const TERMOS_VALOR = new Set([
   "valor", "valores", "pago", "paguei", "pagamento", "pagar", "quantia",
   "dinheiro", "pix", "taxa", "taxas", "tarifa", "anuidade", "arrecadacao",

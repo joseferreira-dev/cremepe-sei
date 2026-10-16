@@ -31,5 +31,6 @@ backend/server.log.err
 
 # Sigiloso / gerado localmente (nunca versionar)
 dicionario-tramites.xlsx
+processos.xlsx
 ~$*
 resumos-*.txt

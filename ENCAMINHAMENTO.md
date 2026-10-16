@@ -185,8 +185,13 @@ A base mostra justamente isso: processos de reembolso têm maior permanência no
 
 **Detecção** (`eReembolso`, tokens acento-insensíveis):
 
-- prefixos inequívocos: `reembol`, `restitu`, `estorn`, `ressarc` — **ou**
+- prefixos inequívocos: `reembol`, `restitu`, `estorn` — **ou**
 - um token iniciando em `devol` que **não** seja devolução de documento **e** tenha um termo de dinheiro (`TERMOS_VALOR`: valor, pago, paguei, pagamento, pix, taxa, anuidade, tarifa, emolumento, custo, preço…) **na mesma janela de contexto (±6 tokens)**.
+
+> **`ressarc` fora do gatilho (15/10/2026)**: "ressarcimento proporcional dos valores já
+> pagos" aparece em pedidos de **cancelamento de inscrição** cujo destino correto é o SEATE
+> (`26.17.000005366-9`: k-NN SEATE 76% era a resposta certa e a regra roubava o topo para
+> SECON). Quem quer SECON usa "reembolso/restituição/estorno" explícitos.
 
 Duas proteções contra falso positivo (boilerplate de formulário/certidão):
 
@@ -216,29 +221,37 @@ de destino é checado **antes** de confiar só na similaridade.
 - ≥ 4 linhas **e** um sinal de estrutura: linha `protocolo...@` em qualquer lugar,
   prefixo `de:/date:/subject:/assunto:/from:/to:/para/enviado:` nas 8 primeiras linhas,
   `forwarded message`, ou letterhead (`ofício|tribunal|ministério público|poder judiciário|pje|
-  procuradoria|comarca|vara cível|prefeitura|conselho federal|carta testemunhal`) nas 8 primeiras.
+  procuradoria|comarca|vara cível|prefeitura|conselho federal|carta testemunhal|
+  polícia civil|governo do estado|secretaria de defesa social|cadastro nacional da pessoa
+  jurídica`) nas 8 primeiras.
 
 Sem o gate, descrições curtas/metadados disparam regras em qualquer texto: na avaliação
 LOO (400 processos, consulta = o próprio contexto) as regras disparariam 135× com
 **19% de precisão** e derrubariam o top-1 de 79,5% para 61%. Com o gate, **nenhuma**
 regra dispara no LOO e o 79,5% fica intacto.
 
-**Cabeçalho — `cabecalhoDoTexto(texto)`**: 5 linhas após a linha de protocolo (ou as
+**Cabeçalho**: `cabecalhoDoTexto(texto)` — 5 linhas após a linha de protocolo (ou as
 5 primeiras de um documento sem cabeçalho de e-mail), normalizadas (`semAcento`:
 minúsculas → NFD → sem acentos → espaços colapsados).
 
-**Regras** (`REGRAS_CONTEUDO`, checadas em ordem; `h` = cabeçalho, `b` = texto inteiro):
+As regras da **família GABIN** (1–3) usam `cabecalhoCombinado(texto)`: as 5 primeiras
+linhas do documento **somadas** às 5 pós-protocolo (flag `combinado`). Em formulários
+(ex.: campos `DENUNCIANTE(S)` no topo) a linha de protocolo vem depois e esconderia o
+sinal no header pós-protocolo; em e-mails o assunto já costuma estar nos dois.
+
+**Regras** (`REGRAS_CONTEUDO`, checadas em ordem; `h` = cabeçalho da regra, `b` = texto inteiro):
 
 | # | Destino | Padrão | Evidência (47 casos) |
 | --- | --- | --- | --- |
-| 1 | `PRESI/GABIN` | `h`: mandado de segurança, `pje.cloud`, processo judicial eletrônico, inquérito civil, polícia federal, `ofício n`, `pr-pe-\d`, convite, "encaminha expediente", estelionato, falsidade ideológica | — |
-| 2 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `h`: `denuncia`, notícia de fato, averiguação, sindicância, verificação cadastral, procedimento preparatório — **todo trâmite desses casos começa pelo gabinete** (ciência da diretoria/presidência) e só depois segue ao setor de processos | pendente (§10) |
-| 3 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `h`: `ministerio publico` (notificação/procedimento do MPE) | pendente (§10) |
+| 1 | `PRESI/GABIN` | `h` combinado: mandado de segurança, `pje.cloud`, processo judicial eletrônico, inquérito civil, polícia federal/policia civil/delegacia, `ofício n`, `pr-pe-\d`, convite, "encaminha expediente", estelionato, falsidade ideológica/falsificação, **"tramitar para o gabin"**, **"gabinete gabin"/`diretoria@`** (e-mail da diretoria), **conselhos regionais (`simepe|cremesp`) e circulares (`circular n`)**, **Forças Armadas (`mil.br|marinha|exercito`)**, inquérito policial | — |
+| 2 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `h` combinado: `denuncia`, notícia de fato, averiguação, sindicância, verificação cadastral, procedimento preparatório — **todo trâmite desses casos começa pelo gabinete** (ciência da diretoria/presidência) e só depois segue ao setor de processos | pendente (§10) |
+| 3 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `h` combinado: `ministerio publico` ou `mppe` (notificação/procedimento do MPE) | pendente (§10) |
 | 4 | `PRESI/GABIN` **+ 2ª `COR/DEPRO`** | `b`: "denuncia encaminhada pelo portal do cremepe" (fallback — o cabeçalho costuma já casar na regra 2) | pendente (§10) |
-| 5 | `SECRET. G./SEBIB` | `h`: `parecer`, `consulta` | 6/6 |
-| 6 | `SECRET. G./SEATE` | `h`: carteira CIM, carteira do médico | 1/1 |
-| 7 | `TESOURARIA/SERECRED` | `h`: pagamento duplicado, gravidade de anuidade | 1/1 |
-| 8 | `TESOURARIA/SECON` | `h`: retirada de débito, 2ª via / segunda via | 1/1 |
+| 5 | `VIP/CP/CEM` | `h`: comitê/comissão de ética (eleição/convoqução) | 2 casos (`5515-7`, `5217-4`) |
+| 6 | `SECRET. G./SEBIB` | `h`: `parecer`, `consulta`, **cessão temporária de útero / gestação por substituição / procriação assistida** (Res. CFM 2.320/2022) | 6/6 + `5441-0` |
+| 7 | `SECRET. G./SEATE` | `h`: carteira CIM, carteira do médico, **Cadastro Nacional da Pessoa Jurídica / comprovante de inscrição e situação cadastral** | 1/1 + `5410-0` |
+| 8 | `TESOURARIA/SERECRED` | `h`: pagamento duplicado, gravidade de anuidade | 1/1 |
+| 9 | `TESOURARIA/SECON` | `h`: retirada de débito, **exclusão de débito/divida**, 2ª via / segunda via | 1/1 + `5014-7` |
 
 **Aplicação** (`aplicarRegraDominio` → `elevarParaTopo`, o mesmo helper da regra 7):
 a sugestão da regra vai para o topo (`max(outros) + 0,02`, teto 0,95) e o resto é
@@ -261,8 +274,10 @@ reembolso (seção 7) por último** — se os dois dispararem no mesmo texto, o 
   divergência era GABIN × DEPRO (único erro das 34 disparos: 97%); desde 07/10 **toda**
   denúncia manda `PRESI/GABIN` com `COR/DEPRO` em 2º e o caso passa a ser esperado como
   GABIN (atualizar o rótulo na planilha — ver §10).
-- Regras de **1 caso** foram deliberadamente **não incluídas** (overfitting): "análise
-  ética → SEATE", "falecimento → 3 destinos". Anotadas como pendência na seção 12.
+- Padrões de **1 caso** só entram com termo altamente específico e semântica defensável
+  (decisão de 15/10/2026): "cessão temporária de útero → SEBIB" e "CNPJ/cadastro → SEATE"
+  foram incluídos; "análise ética → SEATE", "falecimento → 3 destinos" seguem fora
+  (termos genéricos — pendência na seção 12).
 
 ## 9. Dicionário de trâmites (`npm run gerar:dicionario`)
 
@@ -334,6 +349,32 @@ Casos observados:
 | texto sem termos de contexto | `nenhuma` (interface: "sem sugestão") |
 | requisição vazia | `400` |
 
+**Conjunto de divergências — `processos.xlsx` (raiz, aba `Planilha3`, 29 casos)** (15/10/2026):
+casos em que a sugestão divergiu do setor "Correto" (22 deles = `PRESI/GABIN`). Como o
+arquivo não pode ir para o Git (não há `.xlsx` de dados versionado), a validação local é:
+
+```bash
+cd backend
+npx tsx "%TEMP%\opencode\analisa-processos.mts"   # imprime linha a linha e o total
+```
+
+| Momento | Resultado nos 29 |
+| --- | --- |
+| sugestão registrada na planilha | **0/29** (por construção — são só divergências) |
+| sistema antes de 15/10/2026 | 3/29 |
+| **sistema após as melhorias de 15/10** | **24/29 (83%)** |
+
+As 5 falhas restantes **não têm sinal honesto no texto**: OCR ilegível
+(`1174-5`, `5084-8`, `5106-2`) e queixas sem termo de destino (`5121-6` "péssimas
+condições", `5147-0` "arquivos dos hospitais").
+
+> **Decisão (15/10/2026) — despacho NÃO é sinal**: 28/29 fontes contêm `CREMEPE/<SIGLA>`
+> igual ao "Correto", mas são **histórico de rotas conflitantes** (até 10 códigos por caso;
+> extrair o 1º acerta 3/29, o último 10/29). Usar o código do despacho = copiar a chave de
+> resposta na avaliação e fica inerte em demandas novas (não existe despacho ainda). O
+> ganho real veio de padrões de cabeçalho (§8) + gate estendido + remoção de `ressarc`
+> do gatilho de reembolso (§7).
+
 Como revalidar: [§13](#13-como-testar).
 
 ## 11. Como ajustar (constantes e vocabulário)
@@ -347,8 +388,9 @@ Como revalidar: [§13](#13-como-testar).
 | exclusão "devolução de documento" | `SUBSTANTIVOS_DOCUMENTO` |
 | janela de proximidade do termo de dinheiro | `JANELA_VALOR = 6` |
 | sigla do destino garantido | `SECON_SIGLA` |
-| regras por conteúdo | `REGRAS_CONTEUDO` (destino + padrão) |
+| regras por conteúdo | `REGRAS_CONTEUDO` (destino + padrão; flag `combinado`) |
 | janela do cabeçalho | `cabecalhoDoTexto` (`ini + 5` linhas) |
+| cabeçalho combinado (regras GABIN) | `cabecalhoCombinado` (5 primeiras + 5 pós-protocolo) |
 | porta de entrada das regras | `ehDocumentoEstruturado` |
 | unidades nunca rotuláveis | `UNIDADES_EXCLUIDAS` |
 | autoridade → porta de entrada | `ENTRADA_AUTORIDADE` |
@@ -376,7 +418,11 @@ Depois de mexer: reinicie o backend (cache é em memória) e rode os testes do �
 5. **Sem OCR** — arquivos só-imagem não geram texto: se nenhum arquivo tiver texto extraível e não houver descrição, a resposta é `422`.
 6. **Termos inéditos na base não pesam** — uma demanda inteiramente fora do vocabulário histórico cai no fallback por tipo (ou `nenhuma`).
 7. **Descrições vazias** na base (~7%) = processos cujos setores não são unidades internas (CFM/CREMEC/CREMEGO); contam pouco no dicionário.
-8. **Regras de 1 caso não incluídas** (evitar overfitting): "análise ética → SEATE", "falecimento → 3 destinos". Só entram se a evidência crescer.
+8. **Padrões de 1 caso — critério (15/10/2026)**: incluídos só quando o termo é muito
+   específico e a semântica bate com o setor (ex.: "cessão temporária de útero" → SEBIB,
+   "Cadastro Nacional da Pessoa Jurídica" → SEATE). "análise ética → SEATE",
+   "falecimento → 3 destinos" seguem fora (termos genéricos). Só entram se a evidência
+   crescer.
 9. **α da agregação não mexido** — medido: α=0,25 melhora LOO de 79,5%→80,3%; α=0,5→76,8%; α=1 cai para 69,3%. Mantido **α=0 (só similaridade)**; regra de conteúdo cobre o restante sem tocar no k-NN.
 
 ## 13. Como testar
@@ -425,4 +471,14 @@ Checagens de regressão recomendadas após qualquer mudança:
 - ofício/endereçado à presidência → **PRESI/GABIN** (nunca PRESIDENTE/VICE/CORREGEDOR como topo);
 - Habilitação de PJ → DEFIS;
 - texto vazio → `400`; texto sem termos da base → `nenhuma`;
+- "ressarcimento" avulso (cancelamento de inscrição) → **sem** regra de reembolso (k-NN/SEATE intacto);
+- comitê/comissão de ética → **VIP/CP/CEM**; "exclusão de débito" → **TESOURARIA/SECON**; CNPJ/cadastro → **SEATE**; "cessão temporária de útero" → **SEBIB**;
 - `npx tsc --noEmit` (backend) e `cd frontend && npx tsc --noEmit && npm run build`.
+
+Scripts de regressão (rodar do `backend/`, exigem a base local):
+
+```bash
+npx tsx "%TEMP%\opencode\testa-denuncia-gabin.mts"   # regras sintéticas + denúncias reais (16 checks)
+npx tsx "%TEMP%\opencode\analisa-processos.mts"      # planilha dos 29 divergentes (≥24/29)
+node "%TEMP%\opencode\regressao_api.cjs"             # API no ar (BASE_URL=http://127.0.0.1:8000)
+```
