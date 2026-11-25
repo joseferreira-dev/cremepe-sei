@@ -184,18 +184,28 @@ export default function ProcessDetails({ user }: Props) {
     }
     setGeneratingResume(true);
     try {
-      const { resumo: generated, textoFonte } = await generateSummary(process.id, uploadFiles, resumoManualText);
-      setResumoFonteGerado(textoFonte ?? null);
-      setResumoPreview(generated);
-      setEditingPreview(false);
-      setShowPreviewModal(true);
-    } catch (e: any) {
-      dialog.error(e?.message || 'Erro ao gerar resumo.');
+      // Em caso de erro, o diálogo oferece "Tentar novamente" (reenvia o MESMO
+      // conteúdo — arquivos e texto permanecem no estado) ou "Fechar" (mantém o
+      // modal aberto com o conteúdo para edição). Só na sucesso é que o conteúdo
+      // é limpo e o modal é fechado.
+      for (;;) {
+        try {
+          const { resumo: generated, textoFonte } = await generateSummary(process.id, uploadFiles, resumoManualText);
+          setResumoFonteGerado(textoFonte ?? null);
+          setResumoPreview(generated);
+          setEditingPreview(false);
+          setShowPreviewModal(true);
+          setShowUploadModal(false);
+          setUploadFiles([]);
+          setResumoManualText('');
+          return;
+        } catch (e: any) {
+          const tentarNovamente = await dialog.errorRetry(e?.message || 'Erro ao gerar resumo.');
+          if (!tentarNovamente) return;
+        }
+      }
     } finally {
       setGeneratingResume(false);
-      setShowUploadModal(false);
-      setUploadFiles([]);
-      setResumoManualText('');
     }
   };
 

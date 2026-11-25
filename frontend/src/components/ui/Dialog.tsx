@@ -16,6 +16,8 @@ interface DialogOptions {
   variant?: DialogVariant;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** Exibe o botão secundário mesmo fora do variant 'confirm' (ex.: erro com "Tentar novamente"). */
+  showCancel?: boolean;
 }
 
 interface OpenDialog {
@@ -24,6 +26,8 @@ interface OpenDialog {
   success: (message: ReactNode, title?: string) => Promise<void>;
   error: (message: ReactNode, title?: string) => Promise<void>;
   confirm: (message: ReactNode, options?: Partial<DialogOptions>) => Promise<boolean>;
+  /** Erro com botões "Tentar novamente" (true) e "Fechar" (false). */
+  errorRetry: (message: ReactNode, title?: string) => Promise<boolean>;
 }
 
 const DialogContext = createContext<OpenDialog | null>(null);
@@ -58,6 +62,15 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         open({ title, message, variant: 'success', confirmLabel: 'OK' }).then(() => {});
       fn.error = (message: ReactNode, title = 'Erro') =>
         open({ title, message, variant: 'error', confirmLabel: 'OK' }).then(() => {});
+      fn.errorRetry = (message: ReactNode, title = 'Erro') =>
+        open({
+          title,
+          message,
+          variant: 'error',
+          confirmLabel: 'Tentar novamente',
+          cancelLabel: 'Fechar',
+          showCancel: true,
+        });
       fn.confirm = (message: ReactNode, options: Partial<DialogOptions> = {}) => {
         const isDestructive = options.variant === 'confirm';
         return open({
@@ -120,14 +133,19 @@ function DialogSurface({
   if (!state) return null;
   const variant = state.variant ?? 'alert';
   const isConfirm = variant === 'confirm';
+  const showCancel = isConfirm || !!state.showCancel;
   const styles = variantStyles[variant];
+  // Erro com ação secundária ("Tentar novamente") usa a cor primária positiva;
+  // erro simples (só OK) e confirm destrutivo mantêm o vermelho.
+  const confirmColor =
+    variant === 'error' && state.showCancel ? '#009C60' : isConfirm || variant === 'error' ? '#DC2626' : '#009C60';
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-[2px] animate-dialog-fade"
         onClick={() => {
-          if (isConfirm) onClose(false);
+          if (showCancel) onClose(false);
         }}
       />
       <div
@@ -158,7 +176,7 @@ function DialogSurface({
           </div>
         </div>
         <div className="flex gap-3 px-6 pb-6 justify-end">
-          {isConfirm && (
+          {showCancel && (
             <button
               onClick={() => onClose(false)}
               className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors"
@@ -169,7 +187,7 @@ function DialogSurface({
           <button
             className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
             style={{
-              background: variant === 'confirm' || variant === 'error' ? '#DC2626' : '#009C60',
+              background: confirmColor,
               boxShadow: `0 0 0 3px ${styles.ring}`,
             }}
             onClick={() => onClose(true)}
